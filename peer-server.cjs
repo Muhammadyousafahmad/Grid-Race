@@ -1,17 +1,10 @@
 const { PeerServer } = require('peer');
 
-const server = PeerServer({
-  port: 9000,
-  path: '/myapp'
+const port = process.env.PORT || 9000;
+const peerServer = PeerServer({
+  port: port,
+  path: '/myapp',
+  allow_discovery: true
 });
 
-console.log('[PeerServer] Local PeerJS signaling server running on port 9000 at path /myapp');
-
-server.on('connection', (client) => {
-  console.log(`[PeerServer] Client connected: ${client.getId()}`);
-});
-
-server.on('disconnect', (client) => {
-  console.log(`[PeerServer] Client disconnected: ${client.getId()}`);
-});
-
+console.log(`PeerServer running on port ${port}`);
