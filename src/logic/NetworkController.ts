@@ -7,9 +7,6 @@ export interface NetworkPayload {
   action?: GameAction;
 }
 
-/**
- * Checks whether the application is running on localhost during local development.
- */
 export function isLocalhost(): boolean {
   if (typeof window !== 'undefined' && window.location) {
     const hostname = window.location.hostname;
@@ -23,11 +20,6 @@ export function isLocalhost(): boolean {
   return false;
 }
 
-/**
- * Returns configuration based on environment:
- * - Local: connects to local peer server on port 9000
- * - Production: connects directly to PeerServer Cloud over WSS
- */
 export function getPeerConfig(forceLocal?: boolean): PeerOptions {
   const isLocal = forceLocal !== undefined ? forceLocal : isLocalhost();
 
@@ -49,8 +41,12 @@ export function getPeerConfig(forceLocal?: boolean): PeerOptions {
     };
   }
 
-  // Production Cloud Configuration
   return {
+    host: '0.peerjs.com',
+    port: 443,
+    path: '/',
+    secure: true,
+    pingInterval: 5000,
     debug: 1,
     config: { iceServers }
   };
@@ -75,10 +71,9 @@ export class NetworkController implements OpponentController {
       const hostPeerId = `grid-race-${this.roomCode}`;
       const peerOptions = getPeerConfig(this.forceLocal);
 
-      // Provide a client-side ID for the guest to bypass the failing /id?ts=... fetch
       const peerId = this.isHost
         ? hostPeerId
-        : `grid-race-guest-${Math.random().toString(36).substring(2, 9)}-${Date.now().toString(36)}`;
+        : `grid-race-guest-${Math.random().toString(36).substring(2, 8)}-${Date.now().toString(36)}`;
 
       try {
         this.peer = new Peer(peerId, peerOptions);
@@ -87,12 +82,12 @@ export class NetworkController implements OpponentController {
       }
 
       let isSettled = false;
-      let connectionTimeout: ReturnType<typeof setTimeout> | null = null;
+      let handshakeTimeout: ReturnType<typeof setTimeout> | null = null;
 
       const safeResolve = () => {
         if (!isSettled) {
           isSettled = true;
-          if (connectionTimeout) clearTimeout(connectionTimeout);
+          if (handshakeTimeout) clearTimeout(handshakeTimeout);
           resolve();
         }
       };
@@ -100,37 +95,46 @@ export class NetworkController implements OpponentController {
       const safeReject = (err: unknown) => {
         if (!isSettled) {
           isSettled = true;
-          if (connectionTimeout) clearTimeout(connectionTimeout);
+          if (handshakeTimeout) clearTimeout(handshakeTimeout);
           reject(err);
         }
       };
 
-      // 12-second safety watchdog
-      connectionTimeout = setTimeout(() => {
-        safeReject({ type: 'peer-unavailable', message: 'Connection timed out' });
-      }, 12000);
-
-      // 1. WebSocket connection to signaling server opened
-      this.peer.on('open', (id) => {
-        console.log(`[PeerJS] Connected to signaling broker with ID: ${id}`);
-
-        if (!this.isHost) {
-          console.log(`[PeerJS] Guest connecting to Host (${hostPeerId})...`);
-          this.conn = this.peer!.connect(hostPeerId, { reliable: true });
-          this.setupConnectionHandlers(safeResolve, safeReject);
-        }
-      });
-
-      // 2. Host receives incoming guest handshake
+      // 1. Host registers with the broker (15s broker timeout; waits indefinitely for guest)
       if (this.isHost) {
+        handshakeTimeout = setTimeout(() => {
+          safeReject({ type: 'server-error', message: 'Could not connect to matchmaking server.' });
+        }, 15000);
+
+        this.peer.on('open', (id) => {
+          console.log(`[PeerJS] Host registered room with ID: ${id}`);
+          if (handshakeTimeout) {
+            clearTimeout(handshakeTimeout);
+            handshakeTimeout = null;
+          }
+        });
+
         this.peer.on('connection', (connection) => {
-          console.log('[PeerJS] Incoming connection received from guest!');
+          console.log('[PeerJS] Incoming connection from guest!');
           this.conn = connection;
           this.setupConnectionHandlers(safeResolve, safeReject);
         });
       }
 
-      // 3. Signaling error handling
+      // 2. Guest connects to broker then attempts to reach Host (15s total timeout)
+      if (!this.isHost) {
+        handshakeTimeout = setTimeout(() => {
+          safeReject({ type: 'peer-unavailable', message: 'Room not found or Host is not online.' });
+        }, 15000);
+
+        this.peer.on('open', () => {
+          console.log(`[PeerJS] Guest reaching Host (${hostPeerId})...`);
+          this.conn = this.peer!.connect(hostPeerId, { reliable: true });
+          this.setupConnectionHandlers(safeResolve, safeReject);
+        });
+      }
+
+      // 3. Error listener
       this.peer.on('error', (err: any) => {
         console.error('[PeerJS Error]:', err?.type || err);
         safeReject(err);
