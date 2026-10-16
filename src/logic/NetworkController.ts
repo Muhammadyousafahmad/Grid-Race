@@ -24,10 +24,9 @@ export function isLocalhost(): boolean {
 }
 
 /**
- * Returns the PeerJS configuration options based on environment:
- * - Localhost: host 'localhost', port 9000, path '/myapp', secure false
- * - Production: host '0.peerjs.com', port 443, path '/', secure true
- * Both include public Google STUN servers.
+ * Returns configuration based on environment:
+ * - Local: connects to local peer server on port 9000
+ * - Production: connects directly to PeerServer Cloud over WSS
  */
 export function getPeerConfig(forceLocal?: boolean): PeerOptions {
   const isLocal = forceLocal !== undefined ? forceLocal : isLocalhost();
@@ -46,22 +45,14 @@ export function getPeerConfig(forceLocal?: boolean): PeerOptions {
       secure: false,
       pingInterval: 5000,
       debug: 1,
-      config: {
-        iceServers
-      }
+      config: { iceServers }
     };
   }
 
+  // Production Cloud Configuration
   return {
-    host: '0.peerjs.com',
-    port: 443,
-    path: '/',
-    secure: true,
-    pingInterval: 5000,
     debug: 1,
-    config: {
-      iceServers
-    }
+    config: { iceServers }
   };
 }
 
@@ -84,19 +75,24 @@ export class NetworkController implements OpponentController {
       const hostPeerId = `grid-race-${this.roomCode}`;
       const peerOptions = getPeerConfig(this.forceLocal);
 
+      // Provide a client-side ID for the guest to bypass the failing /id?ts=... fetch
+      const peerId = this.isHost
+        ? hostPeerId
+        : `grid-race-guest-${Math.random().toString(36).substring(2, 9)}-${Date.now().toString(36)}`;
+
       try {
-        // Host uses designated room ID; Guest receives an auto-assigned ID
-        this.peer = this.isHost
-          ? new Peer(hostPeerId, peerOptions)
-          : new Peer(peerOptions);
+        this.peer = new Peer(peerId, peerOptions);
       } catch (err) {
         return reject(err);
       }
 
       let isSettled = false;
+      let connectionTimeout: ReturnType<typeof setTimeout> | null = null;
+
       const safeResolve = () => {
         if (!isSettled) {
           isSettled = true;
+          if (connectionTimeout) clearTimeout(connectionTimeout);
           resolve();
         }
       };
@@ -104,13 +100,19 @@ export class NetworkController implements OpponentController {
       const safeReject = (err: unknown) => {
         if (!isSettled) {
           isSettled = true;
+          if (connectionTimeout) clearTimeout(connectionTimeout);
           reject(err);
         }
       };
 
-      // 1. Connection established with the signaling server
+      // 12-second safety watchdog
+      connectionTimeout = setTimeout(() => {
+        safeReject({ type: 'peer-unavailable', message: 'Connection timed out' });
+      }, 12000);
+
+      // 1. WebSocket connection to signaling server opened
       this.peer.on('open', (id) => {
-        console.log(`[PeerJS] Connected to signaling server with ID: ${id}`);
+        console.log(`[PeerJS] Connected to signaling broker with ID: ${id}`);
 
         if (!this.isHost) {
           console.log(`[PeerJS] Guest connecting to Host (${hostPeerId})...`);
@@ -119,7 +121,7 @@ export class NetworkController implements OpponentController {
         }
       });
 
-      // 2. Host handles incoming guest connection
+      // 2. Host receives incoming guest handshake
       if (this.isHost) {
         this.peer.on('connection', (connection) => {
           console.log('[PeerJS] Incoming connection received from guest!');
@@ -128,7 +130,7 @@ export class NetworkController implements OpponentController {
         });
       }
 
-      // 3. Signaling server error handling
+      // 3. Signaling error handling
       this.peer.on('error', (err: any) => {
         console.error('[PeerJS Error]:', err?.type || err);
         safeReject(err);
@@ -136,10 +138,6 @@ export class NetworkController implements OpponentController {
     });
   }
 
-  /**
-   * Sets up connection event listeners on the DataConnection.
-   * Checks conn.open first to prevent race-condition connection drops.
-   */
   private setupConnectionHandlers(onReady: () => void, onError: (err: unknown) => void): void {
     if (!this.conn) return;
 
@@ -151,15 +149,11 @@ export class NetworkController implements OpponentController {
       onReady();
     };
 
-    // Ensure connection event listeners (conn.on('open')) check conn.open first
-    // to prevent race-condition connection drops
     if (this.conn.open) {
       handleReady();
     } else {
       this.conn.on('open', handleReady);
-      if (this.conn.open) {
-        handleReady();
-      }
+      if (this.conn.open) handleReady();
     }
 
     this.conn.on('data', (data: unknown) => {
