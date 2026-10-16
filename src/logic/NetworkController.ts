@@ -41,8 +41,9 @@ export function getPeerConfig(forceLocal?: boolean): PeerOptions {
     };
   }
 
+  // Production: Custom Cloudflare Worker Signaling Broker
   return {
-    host: '0.peerjs.com',
+    host: 'grid-race-peer.yousafahmed859.workers.dev',
     port: 443,
     path: '/',
     secure: true,
@@ -100,14 +101,14 @@ export class NetworkController implements OpponentController {
         }
       };
 
-      // 1. Host registers with the broker (15s broker timeout; waits indefinitely for guest)
+      // 1. Host registers with the worker broker
       if (this.isHost) {
         handshakeTimeout = setTimeout(() => {
-          safeReject({ type: 'server-error', message: 'Could not connect to matchmaking server.' });
+          safeReject({ type: 'server-error', message: 'Could not connect to Cloudflare signaling worker.' });
         }, 15000);
 
         this.peer.on('open', (id) => {
-          console.log(`[PeerJS] Host registered room with ID: ${id}`);
+          console.log(`[PeerJS] Host registered room on Cloudflare Worker: ${id}`);
           if (handshakeTimeout) {
             clearTimeout(handshakeTimeout);
             handshakeTimeout = null;
@@ -121,7 +122,7 @@ export class NetworkController implements OpponentController {
         });
       }
 
-      // 2. Guest connects to broker then attempts to reach Host (15s total timeout)
+      // 2. Guest connects to worker broker then reaches Host
       if (!this.isHost) {
         handshakeTimeout = setTimeout(() => {
           safeReject({ type: 'peer-unavailable', message: 'Room not found or Host is not online.' });
