@@ -1,0 +1,25 @@
+  {
+    "name": "grid-race",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+   "scripts": {
+    "dev": "concurrently -n \"PEER,GAME\" -c \"magenta,cyan\" \"npm run peer\" \"npm run dev:game\"",
+    "dev:game": "vite",
+    "peer": "node peer-server.cjs",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+    "dependencies": {
+      "peerjs": "^1.5.5",
+      "phaser": "^3.90.0"
+    },
+    "devDependencies": {
+      "concurrently": "^10.0.6",
+      "peer": "^1.0.2",
+      "typescript": "^5.7.3",
+      "vite": "^6.2.0",
+      "vitest": "^3.0.8"
+    }
+  }

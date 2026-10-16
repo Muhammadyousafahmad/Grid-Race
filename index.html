@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#070810" />
+    <meta name="description" content="Grid Race — a fast abstract strategy race game. Race to the opposite edge, block with walls, outsmart the CPU." />
+    <title>Grid Race</title>
+
+    <!-- Modern UI fonts (loaded before boot so canvas text renders correctly) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        background-color: #070810;
+      }
+
+      body {
+        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+        /* Ambient page glow so letterboxed areas still feel intentional */
+        background-color: #070810;
+        background-image:
+          radial-gradient(1100px 700px at 50% -10%, rgba(56, 189, 248, 0.09), transparent 60%),
+          radial-gradient(900px 650px at 100% 110%, rgba(248, 113, 113, 0.07), transparent 55%);
+        /* Honour notches / rounded display corners */
+        padding:
+          env(safe-area-inset-top)
+          env(safe-area-inset-right)
+          env(safe-area-inset-bottom)
+          env(safe-area-inset-left);
+      }
+
+      /* Full-viewport host: Phaser scales the 800x800 canvas to fit it (Scale.FIT) */
+      #game-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
+
+      #game-container canvas {
+        display: block;
+        touch-action: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game-container"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+
