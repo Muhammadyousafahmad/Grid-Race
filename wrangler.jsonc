@@ -1,0 +1,5 @@
+{
+  "name": "grid-race-peer",
+  "compatibility_date": "2026-10-12",
+  "main": "worker.js"
+}

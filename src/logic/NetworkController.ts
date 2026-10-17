@@ -23,10 +23,23 @@ export function isLocalhost(): boolean {
 export function getPeerConfig(forceLocal?: boolean): PeerOptions {
   const isLocal = forceLocal !== undefined ? forceLocal : isLocalhost();
 
+  // STUN & TURN servers for cross-network connectivity (mobile 4G/5G <-> Wi-Fi)
   const iceServers = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' }
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay'
+    }
   ];
 
   if (isLocal) {
@@ -41,11 +54,11 @@ export function getPeerConfig(forceLocal?: boolean): PeerOptions {
     };
   }
 
-  // Production: Custom Cloudflare Worker Signaling Broker
+  // Production: Live Deno Deploy Signaling Broker
   return {
-    host: 'grid-race-peer.yousafahmed859.workers.dev',
+    host: 'grid-race.muhammadyousafahmad.deno.net',
     port: 443,
-    path: '/',
+    path: '/myapp',
     secure: true,
     pingInterval: 5000,
     debug: 1,
@@ -101,14 +114,14 @@ export class NetworkController implements OpponentController {
         }
       };
 
-      // 1. Host registers with the worker broker
+      // 1. Host registers with the Deno broker (15s broker timeout; waits indefinitely for guest)
       if (this.isHost) {
         handshakeTimeout = setTimeout(() => {
-          safeReject({ type: 'server-error', message: 'Could not connect to Cloudflare signaling worker.' });
+          safeReject({ type: 'server-error', message: 'Could not connect to Deno signaling server.' });
         }, 15000);
 
         this.peer.on('open', (id) => {
-          console.log(`[PeerJS] Host registered room on Cloudflare Worker: ${id}`);
+          console.log(`[PeerJS] Host registered room on Deno server: ${id}`);
           if (handshakeTimeout) {
             clearTimeout(handshakeTimeout);
             handshakeTimeout = null;
@@ -122,7 +135,7 @@ export class NetworkController implements OpponentController {
         });
       }
 
-      // 2. Guest connects to worker broker then reaches Host
+      // 2. Guest connects to Deno broker then reaches Host (15s total timeout)
       if (!this.isHost) {
         handshakeTimeout = setTimeout(() => {
           safeReject({ type: 'peer-unavailable', message: 'Room not found or Host is not online.' });
