@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
 import { Difficulty } from '../logic/BotAI';
 import { NetworkController } from '../logic/NetworkController';
-import { THEME, mixColor } from '../config/Theme';
+import { applyReadableText, fitCameraToViewport, SceneViewport } from '../config/ResponsiveCanvas';
+import { isDarkMode, saveThemePreference, THEME } from '../config/Theme';
 
 interface MenuCard {
   key: string;
@@ -17,41 +18,41 @@ interface MenuCard {
 const CARDS: MenuCard[] = [
   {
     key: 'EASY',
-    name: 'CASUAL BOT',
+    name: 'EASY',
     category: 'SOLO · EASY',
-    blurb: 'Forgiving AI. Follows shortest BFS path and rarely blocks.',
-    hex: '#4ade80',
-    accent: 0x4ade80,
+    blurb: 'A relaxed opponent for learning the routes.',
+    hex: '#28724d',
+    accent: 0x28724d,
     shortcut: '1',
     iconType: 'circle'
   },
   {
     key: 'MEDIUM',
-    name: 'TACTICIAN',
+    name: 'MEDIUM',
     category: 'SOLO · MEDIUM',
-    blurb: 'Reactive rival. Places walls the moment you pull ahead.',
-    hex: '#38bdf8',
-    accent: 0x38bdf8,
+    blurb: 'A rival that answers your moves with walls.',
+    hex: '#315ea8',
+    accent: 0x315ea8,
     shortcut: '2',
     iconType: 'diamond'
   },
   {
     key: 'HARD',
-    name: 'SABOTEUR',
+    name: 'HARD',
     category: 'SOLO · HARD',
-    blurb: 'Ruthless heuristic engine. Dissects and blocks your best route.',
-    hex: '#f87171',
-    accent: 0xf87171,
+    blurb: 'A sharp rival that plans several moves ahead.',
+    hex: '#b83d2d',
+    accent: 0xb83d2d,
     shortcut: '3',
     iconType: 'triangle'
   },
   {
     key: 'ONLINE',
-    name: 'ONLINE 1v1',
-    category: 'P2P MULTIPLAYER',
-    blurb: 'Create a custom room name or join a friend worldwide.',
-    hex: '#c084fc',
-    accent: 0xc084fc,
+    name: 'PLAY A FRIEND',
+    category: 'ONLINE · 1V1',
+    blurb: 'Create a room or join with your friend’s name.',
+    hex: '#174a3f',
+    accent: 0x174a3f,
     shortcut: '4',
     iconType: 'network'
   }
@@ -62,147 +63,393 @@ export class MenuScene extends Phaser.Scene {
   private isModalOpen = false;
   private pendingNetController: NetworkController | null = null;
   private activeHtmlInput: HTMLInputElement | null = null;
+  private viewport: SceneViewport = { width: 800, height: 800, zoom: 1 };
 
   constructor() {
     super({ key: 'MenuScene' });
   }
 
   create(): void {
+    this.viewport = fitCameraToViewport(this);
     this.launching = false;
     this.isModalOpen = false;
     this.pendingNetController = null;
     this.activeHtmlInput = null;
 
+    this.drawResponsiveLayout();
+    this.setupShortcuts();
+    applyReadableText(this);
+
+    this.scale.on('resize', this.handleResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off('resize', this.handleResize, this);
+    });
+  }
+
+  private handleResize(): void {
+    this.viewport = fitCameraToViewport(this);
+    if (!this.isModalOpen) this.scene.restart();
+  }
+
+  private drawResponsiveLayout(): void {
+    const phone = this.viewport.width < 620;
+    const portraitPhone = phone && this.viewport.height > this.viewport.width * 1.15;
+    const landscapePhone = phone && !portraitPhone;
+    const shortPortraitPhone = portraitPhone && this.viewport.height < 700;
+    const compactWide = !phone && this.viewport.height < 760;
+    const maxContentWidth = this.viewport.width >= 1500 ? 1840 : 1200;
+    const contentWidth = Math.min(this.viewport.width - 80, maxContentWidth);
+    const contentLeft = (this.viewport.width - contentWidth) / 2;
+    let footerY: number;
+    let cardX: number;
+    let cardTop: number;
+    let cardWidth: number;
+    let cardHeight: number;
+    let cardGap: number;
+    let columns: number;
+    let mapX: number;
+    let mapY: number;
+    let mapSize: number;
+    let showMapLabels = true;
+    let showMapCaption = true;
+
+    if (portraitPhone) {
+      const cardGapX = 12;
+      const cardSide = (this.viewport.width - 40 - cardGapX) / 2;
+      footerY = this.viewport.height - (shortPortraitPhone ? 40 : 112);
+      cardTop = shortPortraitPhone ? 154 : 188;
+      cardWidth = cardSide;
+      cardHeight = shortPortraitPhone ? 72 : 92;
+      cardGap = 8;
+      columns = 2;
+      cardX = this.viewport.width / 2;
+      mapY = cardTop + cardHeight * 2 + cardGap + (shortPortraitPhone ? 34 : 50);
+      mapSize = Math.max(0, Math.min(
+        this.viewport.width - 48,
+        footerY - mapY - (shortPortraitPhone ? 24 : 94)
+      ));
+      mapX = (this.viewport.width - mapSize) / 2;
+      showMapLabels = !shortPortraitPhone;
+      showMapCaption = !shortPortraitPhone;
+    } else if (landscapePhone) {
+      footerY = this.viewport.height - 42;
+      cardWidth = (this.viewport.width * 0.53 - 50) / 2;
+      cardHeight = 78;
+      cardGap = 8;
+      columns = 2;
+      cardTop = 132;
+      cardX = this.viewport.width * 0.27;
+      mapSize = Math.min(190, this.viewport.height - 210);
+      mapX = this.viewport.width - mapSize - 34;
+      mapY = 92;
+    } else if (compactWide) {
+      const left = contentLeft;
+      const shortWide = this.viewport.height < 520;
+      footerY = this.viewport.height - (shortWide ? 44 : 54);
+      mapSize = Math.min(240, Math.max(150, this.viewport.height - 380), contentWidth * 0.34);
+      const gridWidth = contentWidth - mapSize - 48;
+      cardWidth = (gridWidth - 12) / 2;
+      cardHeight = shortWide ? 64 : 82;
+      cardGap = shortWide ? 8 : 10;
+      columns = 2;
+      cardTop = shortWide ? 188 : 214;
+      cardX = left + gridWidth / 2;
+      mapX = left + gridWidth + 48;
+      mapY = cardTop;
+      showMapLabels = false;
+      showMapCaption = false;
+    } else {
+      const left = contentLeft;
+      footerY = Math.max(200, this.viewport.height - 110);
+      cardTop = this.viewport.height < 820 ? 228 : 252;
+      cardWidth = 360;
+      cardHeight = this.viewport.height < 820 ? 78 : 94;
+      cardGap = this.viewport.height < 820 ? 10 : 12;
+      columns = 1;
+      cardX = left + cardWidth / 2;
+      mapY = 250;
+      mapSize = Math.min(520, this.viewport.height - mapY - 200, contentWidth - 48 - cardWidth);
+      mapSize = Math.max(240, mapSize);
+      cardWidth = contentWidth - mapSize - 48;
+      cardX = left + cardWidth / 2;
+      mapX = left + cardWidth + 48;
+    }
+
     this.drawBackground();
     this.drawHeader();
-    this.drawCardsGrid();
-    this.drawFooter();
-    this.setupShortcuts();
+    this.drawCardsGrid(cardX, cardTop, cardWidth, cardHeight, cardGap, columns);
+    if (mapSize > 0) this.drawRouteMap(mapX, mapY, mapSize, phone, showMapLabels, showMapCaption);
+    this.drawFooter(footerY);
   }
 
   private drawBackground(): void {
     const gfx = this.add.graphics();
     gfx.fillStyle(THEME.colors.bg, 1);
-    gfx.fillRect(0, 0, 800, 800);
+    gfx.fillRect(0, 0, this.viewport.width, this.viewport.height);
 
-    const BANDS = 48;
-    const bandH = 800 / BANDS;
-    for (let i = 0; i < BANDS; i++) {
-      gfx.fillStyle(mixColor(0x0e1428, THEME.colors.bgDeep, i / (BANDS - 1)), 1);
-      gfx.fillRect(0, i * bandH, 800, bandH + 1);
-    }
-
-    gfx.lineStyle(1, 0x1b233d, 0.45);
-    for (let x = 0; x <= 800; x += 40) gfx.lineBetween(x, 0, x, 800);
-    for (let y = 0; y <= 800; y += 40) gfx.lineBetween(0, y, 800, y);
-
-    this.softGlow(gfx, 120, 100, THEME.colors.accent, 260);
-    this.softGlow(gfx, 680, 680, 0xc084fc, 240);
-  }
-
-  private softGlow(g: Phaser.GameObjects.Graphics, cx: number, cy: number, color: number, maxR: number): void {
-    for (let i = 4; i >= 1; i--) {
-      g.fillStyle(color, 0.02);
-      g.fillCircle(cx, cy, (maxR * i) / 4);
+    gfx.lineStyle(1, THEME.colors.border, 0.07);
+    for (let i = 0; i < 7; i++) {
+      gfx.strokeEllipse(this.viewport.width * 0.78, this.viewport.height * 0.37, 300 + i * 44, 230 + i * 38);
     }
   }
 
   private drawHeader(): void {
-    const cx = 400;
+    const phone = this.viewport.width < 620;
+    const portraitPhone = phone && this.viewport.height > this.viewport.width * 1.15;
+    const landscapePhone = phone && !portraitPhone;
+    const shortPortraitPhone = portraitPhone && this.viewport.height < 700;
+    const shortWide = !phone && this.viewport.height < 520;
+    const contentWidth = Math.min(this.viewport.width - 80, this.viewport.width >= 1500 ? 1840 : 1200);
+    const left = phone ? 20 : (this.viewport.width - contentWidth) / 2;
+    const titleY = shortPortraitPhone ? 12 : (portraitPhone ? 22 : (landscapePhone ? 12 : 44));
+    const headlineY = shortPortraitPhone ? 40 : (portraitPhone ? 56 : (landscapePhone ? 42 : 102));
+    const headlineSize = phone
+      ? (shortPortraitPhone ? '24px' : (portraitPhone ? '32px' : '26px'))
+      : (this.viewport.width < 700 ? '30px' : (this.viewport.width < 900 ? '36px' : '46px'));
+    const subtitle = shortWide
+      ? 'Two runners. One grid. Every wall changes the route.'
+      : 'Two runners. One shared grid. Every wall opens a new way through.';
+    const headline = shortPortraitPhone
+      ? 'Read the route.\nChange the race.'
+      : (portraitPhone ? 'Read the route.\nChange the race.' : 'Read the route. Change the race.');
 
-    const badgeW = 210;
-    const badgeH = 24;
-    const badge = this.add.graphics();
-    badge.fillStyle(THEME.colors.accent, 0.08);
-    badge.fillRoundedRect(cx - badgeW / 2, 45, badgeW, badgeH, 12);
-    badge.lineStyle(1, THEME.colors.accent, 0.4);
-    badge.strokeRoundedRect(cx - badgeW / 2, 45, badgeW, badgeH, 12);
+    this.add.text(left, titleY, 'GRID RACE', {
+      fontFamily: THEME.fonts.heading,
+      fontSize: phone ? '20px' : '28px',
+      color: THEME.colors.textPrimary,
+      fontStyle: 'bold',
+      letterSpacing: 1
+    });
 
-    this.add.text(cx, 57, 'COMPETITIVE RACING ENGINE', {
+    this.add.text(left, headlineY, headline, {
+      fontFamily: THEME.fonts.heading,
+      fontSize: headlineSize,
+      color: THEME.colors.textPrimary,
+      fontStyle: 'bold',
+      lineSpacing: -2,
+      wordWrap: { width: this.viewport.width - left * 2 }
+    });
+
+    const subtitleY = shortPortraitPhone ? 100 : (portraitPhone ? 132 : (landscapePhone ? 78 : 161));
+    this.add.text(left + 2, subtitleY, subtitle, {
       fontFamily: THEME.fonts.body,
-      fontSize: '9px',
-      color: THEME.colors.accentHex,
-      fontStyle: 'bold',
-      letterSpacing: 2
-    }).setOrigin(0.5);
+      fontSize: shortPortraitPhone || shortWide ? '14px' : (portraitPhone ? '16px' : (landscapePhone ? '14px' : '19px')),
+      color: THEME.colors.textSecondary,
+      wordWrap: {
+        width: landscapePhone
+          ? this.viewport.width * 0.55
+          : (shortPortraitPhone ? this.viewport.width - left * 2 : this.viewport.width - left * 2)
+      }
+    });
 
-    const titleContainer = this.add.container(cx, 108);
-    const titleGrid = this.add.text(-10, 0, 'GRID', {
+    const themeButtonWidth = phone ? 104 : 118;
+    const themeButtonHeight = phone ? 36 : 40;
+    const themeButton = this.add.container(
+      this.viewport.width - left,
+      titleY + (landscapePhone ? 0 : 4)
+    );
+    const buttonGfx = this.add.graphics();
+    const iconGfx = this.add.graphics();
+    const buttonLabel = this.add.text(18, 0, isDarkMode() ? 'LIGHT' : 'DARK', {
       fontFamily: THEME.fonts.heading,
-      fontSize: '48px',
-      color: '#38bdf8',
+      fontSize: phone ? '13px' : '14px',
+      color: THEME.colors.textPrimary,
       fontStyle: 'bold',
-      letterSpacing: 6
-    }).setOrigin(1, 0.5);
-
-    const titleRace = this.add.text(10, 0, 'RACE', {
-      fontFamily: THEME.fonts.heading,
-      fontSize: '48px',
-      color: '#f87171',
-      fontStyle: 'bold',
-      letterSpacing: 6
+      letterSpacing: 0.8
     }).setOrigin(0, 0.5);
+    const redrawButton = (): void => {
+      buttonGfx.clear();
+      buttonGfx.fillStyle(THEME.colors.surfaceRaised, 1);
+      buttonGfx.fillRoundedRect(-themeButtonWidth, 0, themeButtonWidth, themeButtonHeight, 7);
+      buttonGfx.lineStyle(1, THEME.colors.borderSoft, 1);
+      buttonGfx.strokeRoundedRect(-themeButtonWidth, 0, themeButtonWidth, themeButtonHeight, 7);
 
-    titleContainer.add([titleGrid, titleRace]);
-
-    this.add.text(cx, 146, 'Outmaneuver your opponent. Deploy walls. Claim their home row.', {
-      fontFamily: THEME.fonts.body,
-      fontSize: '12px',
-      color: THEME.colors.textSecondary
-    }).setOrigin(0.5);
+      iconGfx.clear();
+      const iconX = -themeButtonWidth + 18;
+      const iconY = themeButtonHeight / 2;
+      iconGfx.lineStyle(1.5, THEME.colors.accent, 1);
+      if (isDarkMode()) {
+        iconGfx.fillStyle(THEME.colors.accent, 1);
+        iconGfx.fillCircle(iconX, iconY, 6);
+        iconGfx.fillStyle(THEME.colors.surfaceRaised, 1);
+        iconGfx.fillCircle(iconX + 4, iconY - 3, 6);
+      } else {
+        iconGfx.fillStyle(THEME.colors.accent, 1);
+        iconGfx.fillCircle(iconX, iconY, 4);
+        for (let ray = 0; ray < 8; ray++) {
+          const angle = (Math.PI * 2 * ray) / 8;
+          iconGfx.lineBetween(
+            iconX + Math.cos(angle) * 7,
+            iconY + Math.sin(angle) * 7,
+            iconX + Math.cos(angle) * 9,
+            iconY + Math.sin(angle) * 9
+          );
+        }
+      }
+      buttonLabel.setText(isDarkMode() ? 'LIGHT' : 'DARK');
+      buttonLabel.setPosition(-themeButtonWidth + 36, themeButtonHeight / 2);
+    };
+    redrawButton();
+    const buttonHit = this.add.rectangle(
+      -themeButtonWidth / 2,
+      themeButtonHeight / 2,
+      themeButtonWidth,
+      themeButtonHeight,
+      0,
+      0
+    ).setInteractive({ useHandCursor: true });
+    buttonHit.on('pointerdown', () => {
+      saveThemePreference(!isDarkMode());
+      this.scene.restart();
+    });
+    themeButton.add([buttonGfx, iconGfx, buttonLabel, buttonHit]);
   }
 
-  private drawCardsGrid(): void {
-    const w = 346;
-    const h = 175;
-    const col1X = 222;
-    const col2X = 578;
-    const row1Y = 270;
-    const row2Y = 460;
+  private drawRouteMap(
+    x: number,
+    y: number,
+    size: number,
+    mobile: boolean,
+    showLabels = true,
+    showCaption = true
+  ): void {
+    const gfx = this.add.graphics();
+    const cellSize = size / 9;
+    const boardSize = size;
+    const center = (row: number, col: number) => ({
+      x: x + col * cellSize + cellSize / 2,
+      y: y + row * cellSize + cellSize / 2
+    });
 
-    const positions = [
-      { x: col1X, y: row1Y },
-      { x: col2X, y: row1Y },
-      { x: col1X, y: row2Y },
-      { x: col2X, y: row2Y }
+    gfx.fillStyle(THEME.colors.surface, 1);
+    gfx.fillRect(x - 12, y - 12, boardSize + 24, boardSize + 24);
+    gfx.lineStyle(1, THEME.colors.border, 0.35);
+    gfx.strokeRect(x - 12, y - 12, boardSize + 24, boardSize + 24);
+
+    gfx.fillStyle(THEME.colors.map, 1);
+    gfx.fillRect(x, y, boardSize, boardSize);
+    gfx.lineStyle(1, THEME.colors.border, 0.25);
+    for (let i = 0; i <= 9; i++) {
+      gfx.lineBetween(x + i * cellSize, y, x + i * cellSize, y + boardSize);
+      gfx.lineBetween(x, y + i * cellSize, x + boardSize, y + i * cellSize);
+    }
+
+    const route = [
+      center(8, 4), center(7, 4), center(6, 4), center(6, 3),
+      center(5, 3), center(4, 3), center(4, 4), center(3, 4),
+      center(2, 4), center(1, 4), center(0, 4)
     ];
+    gfx.lineStyle(Math.max(3, cellSize * 0.075), THEME.colors.accent, 0.7);
+    for (let i = 1; i < route.length; i++) {
+      gfx.lineBetween(route[i - 1].x, route[i - 1].y, route[i].x, route[i].y);
+    }
 
+    const wall = center(5, 4);
+    gfx.fillStyle(THEME.colors.border, 1);
+    gfx.fillRect(wall.x - cellSize * 0.7, wall.y - cellSize * 0.08, cellSize * 1.4, cellSize * 0.16);
+
+    const start = center(8, 4);
+    const finish = center(0, 4);
+    gfx.fillStyle(THEME.colors.accent, 1);
+    gfx.fillCircle(start.x, start.y, cellSize * 0.28);
+    gfx.lineStyle(Math.max(3, cellSize * 0.08), THEME.colors.surface, 1);
+    gfx.strokeCircle(start.x, start.y, cellSize * 0.28);
+
+    gfx.fillStyle(THEME.colors.danger, 1);
+    gfx.fillPoints([
+      { x: finish.x, y: finish.y - cellSize * 0.3 },
+      { x: finish.x + cellSize * 0.3, y: finish.y },
+      { x: finish.x, y: finish.y + cellSize * 0.3 },
+      { x: finish.x - cellSize * 0.3, y: finish.y }
+    ], true);
+    gfx.lineStyle(Math.max(3, cellSize * 0.08), THEME.colors.surface, 1);
+    gfx.strokePoints([
+      { x: finish.x, y: finish.y - cellSize * 0.3 },
+      { x: finish.x + cellSize * 0.3, y: finish.y },
+      { x: finish.x, y: finish.y + cellSize * 0.3 },
+      { x: finish.x - cellSize * 0.3, y: finish.y }
+    ], true);
+
+    if (showLabels) {
+      this.add.text(x, y - 36, 'START', {
+        fontFamily: THEME.fonts.heading,
+        fontSize: mobile ? '18px' : '17px',
+        color: THEME.colors.accentHex,
+        fontStyle: 'bold',
+        letterSpacing: 1
+      });
+      this.add.text(x + boardSize, y - 36, 'FINISH', {
+        fontFamily: THEME.fonts.heading,
+        fontSize: mobile ? '18px' : '17px',
+        color: THEME.colors.dangerHex,
+        fontStyle: 'bold',
+        letterSpacing: 1
+      }).setOrigin(1, 0);
+    }
+
+    if (showCaption) {
+      this.add.text(x, y + size + 27, mobile ? 'WALLS CHANGE ROUTES' : 'A WALL CHANGES THE ROUTE', {
+        fontFamily: THEME.fonts.heading,
+        fontSize: mobile ? '16px' : '18px',
+        color: THEME.colors.textPrimary,
+        fontStyle: 'bold',
+        letterSpacing: 1
+      });
+      this.add.text(x, y + size + 56, 'Keep both routes open.', {
+        fontFamily: THEME.fonts.body,
+        fontSize: '16px',
+        color: THEME.colors.textSecondary
+      });
+    }
+  }
+
+  private drawCardsGrid(
+    x: number,
+    top: number,
+    width: number,
+    height: number,
+    gap: number,
+    columns: number
+  ): void {
     CARDS.forEach((spec, i) => {
-      this.buildCard(positions[i].x, positions[i].y, w, h, spec);
+      const column = i % columns;
+      const row = Math.floor(i / columns);
+      const cardX = x + (column - (columns - 1) / 2) * (width + 12);
+      this.buildCard(cardX, top + height / 2 + row * (height + gap), width, height, spec);
     });
   }
 
   private buildCard(cx: number, cy: number, w: number, h: number, spec: MenuCard): void {
     const container = this.add.container(cx, cy);
     const gfx = this.add.graphics();
+    const narrowCard = w < 220;
+    const compact = narrowCard || (this.viewport.width >= 620 && this.viewport.height < 760);
+    const shortRow = h < 84 && !narrowCard;
+    const accent = spec.key === 'EASY'
+      ? THEME.colors.success
+      : spec.key === 'MEDIUM'
+        ? THEME.colors.accent
+        : spec.key === 'HARD'
+          ? THEME.colors.danger
+          : THEME.colors.border;
+    const accentHex = Phaser.Display.Color.IntegerToColor(accent).rgba;
 
     const draw = (hover: boolean) => {
       gfx.clear();
-      if (hover) {
-        gfx.fillStyle(0x000000, 0.5);
-        gfx.fillRoundedRect(-w / 2 + 3, -h / 2 + 8, w, h, 14);
-      }
-      gfx.fillStyle(hover ? 0x161c2e : THEME.colors.surface, 1);
-      gfx.fillRoundedRect(-w / 2, -h / 2, w, h, 14);
-
-      gfx.lineStyle(hover ? 2 : 1.2, spec.accent, hover ? 1 : 0.35);
-      gfx.strokeRoundedRect(-w / 2, -h / 2, w, h, 14);
-
-      gfx.fillStyle(spec.accent, hover ? 1 : 0.7);
-      gfx.fillRoundedRect(-w / 2 + 3, -h / 2 + 16, 4, h - 32, 2);
-
-      gfx.fillStyle(0x0a0c15, 1);
-      gfx.fillRoundedRect(w / 2 - 38, -h / 2 + 14, 24, 24, 6);
-      gfx.lineStyle(1, THEME.colors.borderSoft, 1);
-      gfx.strokeRoundedRect(w / 2 - 38, -h / 2 + 14, 24, 24, 6);
+      gfx.fillStyle(hover ? THEME.colors.surfaceRaised : THEME.colors.surface, 1);
+      gfx.fillRect(-w / 2, -h / 2, w, h);
+      gfx.lineStyle(hover ? 2 : 1, hover ? accent : THEME.colors.borderSoft, 1);
+      gfx.strokeRect(-w / 2, -h / 2, w, h);
+      gfx.fillStyle(accent, 1);
+      gfx.fillRect(-w / 2, -h / 2, 5, h);
     };
 
     draw(false);
 
     const iconGfx = this.add.graphics();
-    const ix = -w / 2 + 32;
-    const iy = -h / 2 + 32;
-    iconGfx.fillStyle(spec.accent, 1);
+    const ix = -w / 2 + (compact ? 20 : 34);
+    const iy = 0;
+    iconGfx.fillStyle(accent, 1);
 
     if (spec.iconType === 'circle') {
       iconGfx.fillCircle(ix, iy, 8);
@@ -217,40 +464,49 @@ export class MenuScene extends Phaser.Scene {
       iconGfx.fillCircle(ix - 5, iy - 5, 3.5);
       iconGfx.fillCircle(ix + 5, iy - 5, 3.5);
       iconGfx.fillCircle(ix, iy + 6, 3.5);
-      iconGfx.lineStyle(1.2, spec.accent, 0.7);
+      iconGfx.lineStyle(1.2, accent, 0.7);
       iconGfx.lineBetween(ix - 5, iy - 5, ix + 5, iy - 5);
       iconGfx.lineBetween(ix - 5, iy - 5, ix, iy + 6);
       iconGfx.lineBetween(ix + 5, iy - 5, ix, iy + 6);
     }
 
-    const categoryText = this.add.text(-w / 2 + 50, -h / 2 + 25, spec.category, {
+    const textLeft = -w / 2 + (narrowCard ? 36 : 68);
+    const categoryText = this.add.text(textLeft, -h / 2 + (shortRow ? 8 : (compact ? 11 : 14)), narrowCard ? '' : spec.category, {
       fontFamily: THEME.fonts.body,
-      fontSize: '9px',
-      color: spec.hex,
+      fontSize: shortRow ? '12px' : '14px',
+      color: accentHex,
       fontStyle: 'bold',
-      letterSpacing: 2
+      letterSpacing: compact ? 0 : 2
     });
 
-    const nameText = this.add.text(-w / 2 + 24, -h / 2 + 58, spec.name, {
+    const cardName = narrowCard && spec.key === 'ONLINE' ? 'FRIEND' : spec.name;
+    const nameText = this.add.text(textLeft, -h / 2 + (narrowCard ? 18 : (shortRow ? 25 : 42)), cardName, {
       fontFamily: THEME.fonts.heading,
-      fontSize: '18px',
+      fontSize: narrowCard ? '18px' : (shortRow ? '20px' : '24px'),
       color: THEME.colors.textPrimary,
       fontStyle: 'bold',
-      letterSpacing: 1
+      letterSpacing: 0.4
     });
 
-    const blurbText = this.add.text(-w / 2 + 24, -h / 2 + 90, spec.blurb, {
+    const compactBlurb: Record<MenuCard['key'], string> = {
+      EASY: 'Easy start.',
+      MEDIUM: 'Uses walls.',
+      HARD: 'Plans ahead.',
+      ONLINE: 'Play 1v1.'
+    };
+    const blurb = narrowCard ? compactBlurb[spec.key as MenuCard['key']] : spec.blurb;
+    const blurbText = this.add.text(textLeft, -h / 2 + (narrowCard ? 48 : (shortRow ? 50 : 70)), blurb, {
       fontFamily: THEME.fonts.body,
-      fontSize: '11px',
+      fontSize: narrowCard ? (w < 145 ? '13px' : '14px') : (shortRow ? '15px' : '16px'),
       color: THEME.colors.textSecondary,
-      lineSpacing: 4,
-      wordWrap: { width: w - 48 }
+      lineSpacing: 1,
+      wordWrap: { width: w - (narrowCard ? 46 : 110) }
     });
 
-    const shortcutText = this.add.text(w / 2 - 26, -h / 2 + 26, spec.shortcut, {
+    const shortcutText = this.add.text(w / 2 - (narrowCard ? 14 : 32), -h / 2 + (shortRow ? 12 : (compact ? 12 : 16)), narrowCard ? '' : spec.shortcut, {
       fontFamily: THEME.fonts.heading,
-      fontSize: '12px',
-      color: THEME.colors.textSecondary,
+      fontSize: compact ? '15px' : '19px',
+      color: THEME.colors.textPrimary,
       fontStyle: 'bold'
     }).setOrigin(0.5);
 
@@ -275,31 +531,83 @@ export class MenuScene extends Phaser.Scene {
     });
   }
 
-  private drawFooter(): void {
-    const cx = 400;
+  private drawFooter(top: number): void {
+    const phone = this.viewport.width < 620;
+    const portraitPhone = phone && this.viewport.height > this.viewport.width * 1.15;
+    const landscapePhone = phone && !portraitPhone;
+    const shortPortraitPhone = portraitPhone && this.viewport.height < 700;
+    const compactWide = !phone && this.viewport.height < 760;
+    const contentWidth = Math.min(this.viewport.width - 80, this.viewport.width >= 1500 ? 1840 : 1200);
+    const left = phone ? 20 : (this.viewport.width - contentWidth) / 2;
     const rule = this.add.graphics();
-    rule.lineStyle(1, 0x1e2742, 0.8);
-    rule.lineBetween(cx - 240, 580, cx + 240, 580);
+    rule.lineStyle(1, THEME.colors.border, 0.35);
+    rule.lineBetween(left, top, this.viewport.width - left, top);
 
-    this.add.text(cx, 608, 'TAP OR PRESS  [ 1 · 2 · 3 · 4 ]  TO PLAY', {
+    if (shortPortraitPhone) {
+      this.add.text(left + 2, top + 8, 'TAP A CARD TO PLAY', {
+        fontFamily: THEME.fonts.body,
+        fontSize: '14px',
+        color: THEME.colors.textPrimary,
+        fontStyle: 'bold'
+      });
+      return;
+    }
+
+    if (landscapePhone || compactWide) {
+      this.add.text(left, top + 8, '1 EASY     2 MEDIUM     3 HARD     4 FRIEND ROOM', {
+        fontFamily: THEME.fonts.body,
+        fontSize: phone ? '14px' : '16px',
+        color: THEME.colors.textPrimary,
+        fontStyle: 'bold'
+      });
+      return;
+    }
+
+    this.add.text(left + 2, top + (portraitPhone ? 8 : 18), 'CHOOSE A RIVAL', {
       fontFamily: THEME.fonts.heading,
-      fontSize: '11px',
+      fontSize: '18px',
+      color: THEME.colors.textPrimary,
+      fontStyle: 'bold',
+      letterSpacing: 1
+    });
+
+    this.add.text(
+      left + 2,
+      top + (portraitPhone ? 34 : 48),
+      portraitPhone ? 'Move. Place a wall. Keep both routes open.' : 'Move one space or place a wall. Block the route, never the finish.',
+      {
+      fontFamily: THEME.fonts.body,
+      fontSize: '16px',
+      color: THEME.colors.textSecondary,
+      wordWrap: { width: this.viewport.width - left * 2 }
+      }
+    );
+
+    if (portraitPhone) {
+      this.add.text(left + 2, top + 60, 'KEYS  1 EASY · 2 MEDIUM', {
+        fontFamily: THEME.fonts.body,
+        fontSize: '14px',
+        color: THEME.colors.textMuted,
+        fontStyle: 'bold',
+        letterSpacing: 0.4
+      });
+      this.add.text(left + 2, top + 80, '3 HARD · 4 FRIEND ROOM', {
+        fontFamily: THEME.fonts.body,
+        fontSize: '14px',
+        color: THEME.colors.textMuted,
+        fontStyle: 'bold',
+        letterSpacing: 0.4
+      });
+      return;
+    }
+
+    this.add.text(left + 2, top + 83, 'KEYS  1 EASY     2 MEDIUM     3 HARD     4 FRIEND ROOM', {
+      fontFamily: THEME.fonts.body,
+      fontSize: '15px',
       color: THEME.colors.textMuted,
       fontStyle: 'bold',
-      letterSpacing: 2
-    }).setOrigin(0.5);
-
-    this.add.text(cx, 642, 'Turn Rules: Move token 1 step  ·  OR place a wall border to divert opponent.', {
-      fontFamily: THEME.fonts.body,
-      fontSize: '11px',
-      color: THEME.colors.textSecondary
-    }).setOrigin(0.5);
-
-    this.add.text(cx, 664, 'Strict Blockade Rule: Neither player can ever be completely boxed in.', {
-      fontFamily: THEME.fonts.body,
-      fontSize: '10px',
-      color: THEME.colors.textMuted
-    }).setOrigin(0.5);
+      letterSpacing: 0.7
+    });
   }
 
   private setupShortcuts(): void {
@@ -371,19 +679,25 @@ export class MenuScene extends Phaser.Scene {
 
   private openOnlineLobby(): void {
     this.isModalOpen = true;
-    const cx = 400;
-    const cy = 400;
+    const cx = this.viewport.width / 2;
+    const cy = this.viewport.height / 2;
 
     const modal = this.add.container(cx, cy).setDepth(100);
-    const overlay = this.add.rectangle(0, 0, 800, 800, 0x05070e, 0.88).setInteractive();
+    const overlay = this.add.rectangle(
+      0, 0, this.viewport.width, this.viewport.height, THEME.colors.overlay, 0.84
+    ).setInteractive();
 
-    const panelW = 520;
+    const panelW = Math.min(640, this.viewport.width - 32);
     const panelH = 410;
+    const modalInputWidth = Math.min(280, panelW - 40);
+    const modalCodeWidth = Math.min(300, panelW - 40);
+    const modalActionWidth = Math.min(240, panelW - 40);
+    const modalPasteWidth = Math.min(220, panelW - 40);
     const panel = this.add.graphics();
     panel.fillStyle(THEME.colors.surface, 1);
-    panel.fillRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 18);
-    panel.lineStyle(1.5, 0xc084fc, 0.85);
-    panel.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 18);
+    panel.fillRect(-panelW / 2, -panelH / 2, panelW, panelH);
+    panel.lineStyle(2, THEME.colors.border, 1);
+    panel.strokeRect(-panelW / 2, -panelH / 2, panelW, panelH);
 
     const contentContainer = this.add.container(0, 0);
 
@@ -394,8 +708,16 @@ export class MenuScene extends Phaser.Scene {
         this.pendingNetController = null;
       }
       this.isModalOpen = false;
+      this.scale.off('resize', handleModalResize, this);
       modal.destroy();
     };
+
+    const handleModalResize = (): void => {
+      this.viewport = fitCameraToViewport(this);
+      closeModal();
+      this.scene.restart();
+    };
+    this.scale.on('resize', handleModalResize, this);
 
     modal.add([overlay, panel, contentContainer]);
 
@@ -407,7 +729,7 @@ export class MenuScene extends Phaser.Scene {
       const title = this.add.text(0, -150, 'ONLINE MULTIPLAYER', {
         fontFamily: THEME.fonts.heading,
         fontSize: '22px',
-        color: '#f8fafc',
+        color: THEME.colors.textPrimary,
         fontStyle: 'bold',
         letterSpacing: 2
       }).setOrigin(0.5);
@@ -415,68 +737,78 @@ export class MenuScene extends Phaser.Scene {
       const sub = this.add.text(0, -118, 'Select an action to start a 1v1 match:', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#94a3b8'
+        color: THEME.colors.textSecondary
       }).setOrigin(0.5);
 
       // Button A: Host Room
       const hostBtnBox = this.add.graphics();
-      hostBtnBox.fillStyle(0x161f36, 1);
-      hostBtnBox.fillRoundedRect(-200, -85, 400, 74, 12);
-      hostBtnBox.lineStyle(1.5, 0x38bdf8, 0.7);
-      hostBtnBox.strokeRoundedRect(-200, -85, 400, 74, 12);
+      hostBtnBox.fillStyle(THEME.colors.surfaceRaised, 1);
+      const choiceButtonWidth = Math.min(400, panelW - 32);
+      hostBtnBox.fillRect(-choiceButtonWidth / 2, -90, choiceButtonWidth, 84);
+      hostBtnBox.lineStyle(1.5, THEME.colors.accent, 0.9);
+      hostBtnBox.strokeRect(-choiceButtonWidth / 2, -90, choiceButtonWidth, 84);
 
-      const hostTitle = this.add.text(0, -62, 'CREATE A ROOM (Host as Blue)', {
+      const hostTitle = this.add.text(0, -63, 'CREATE ROOM · HOST BLUE', {
         fontFamily: THEME.fonts.heading,
-        fontSize: '14px',
-        color: '#38bdf8',
+        fontSize: '16px',
+        color: THEME.colors.accentHex,
         fontStyle: 'bold',
-        letterSpacing: 1
+        letterSpacing: 0.4,
+        wordWrap: { width: choiceButtonWidth - 16 },
+        align: 'center'
       }).setOrigin(0.5);
 
-      const hostSub = this.add.text(0, -40, 'Name your own room or use an auto-generated code', {
+      const hostSub = this.add.text(0, -38, 'Share your room name with a friend.', {
         fontFamily: THEME.fonts.body,
-        fontSize: '10px',
-        color: '#94a3b8'
+        fontSize: '14px',
+        color: THEME.colors.textSecondary,
+        wordWrap: { width: choiceButtonWidth - 16 },
+        align: 'center'
       }).setOrigin(0.5);
 
-      const hostHit = this.add.rectangle(0, -48, 400, 74, 0, 0)
+      const hostHit = this.add.rectangle(0, -48, choiceButtonWidth, 84, 0, 0)
         .setInteractive({ useHandCursor: true });
       hostHit.on('pointerdown', () => showHostSetupView());
 
       // Button B: Join Room
       const joinBtnBox = this.add.graphics();
-      joinBtnBox.fillStyle(0x161f36, 1);
-      joinBtnBox.fillRoundedRect(-200, 10, 400, 74, 12);
-      joinBtnBox.lineStyle(1.5, 0xf87171, 0.7);
-      joinBtnBox.strokeRoundedRect(-200, 10, 400, 74, 12);
+      joinBtnBox.fillStyle(THEME.colors.surfaceRaised, 1);
+      joinBtnBox.fillRect(-choiceButtonWidth / 2, 6, choiceButtonWidth, 84);
+      joinBtnBox.lineStyle(1.5, THEME.colors.danger, 0.9);
+      joinBtnBox.strokeRect(-choiceButtonWidth / 2, 6, choiceButtonWidth, 84);
 
-      const joinTitle = this.add.text(0, 33, 'JOIN A ROOM (Play as Red)', {
+      const joinTitle = this.add.text(0, 34, 'JOIN ROOM · PLAY RED', {
         fontFamily: THEME.fonts.heading,
-        fontSize: '14px',
-        color: '#f87171',
+        fontSize: '16px',
+        color: THEME.colors.dangerHex,
         fontStyle: 'bold',
-        letterSpacing: 1
+        letterSpacing: 0.4,
+        wordWrap: { width: choiceButtonWidth - 16 },
+        align: 'center'
       }).setOrigin(0.5);
 
-      const joinSub = this.add.text(0, 55, 'Enter the room name created by your friend', {
+      const joinSub = this.add.text(0, 60, 'Enter the room name from your friend.', {
         fontFamily: THEME.fonts.body,
-        fontSize: '10px',
-        color: '#94a3b8'
+        fontSize: '14px',
+        color: THEME.colors.textSecondary,
+        wordWrap: { width: choiceButtonWidth - 16 },
+        align: 'center'
       }).setOrigin(0.5);
 
-      const joinHit = this.add.rectangle(0, 47, 400, 74, 0, 0)
+      const joinHit = this.add.rectangle(0, 48, choiceButtonWidth, 84, 0, 0)
         .setInteractive({ useHandCursor: true });
       joinHit.on('pointerdown', () => showJoinInputView());
 
       const cancel = this.add.text(0, 155, '← BACK TO MAIN MENU', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#64748b',
+        color: THEME.colors.textMuted,
         fontStyle: 'bold'
       }).setOrigin(0.5).setInteractive({ useHandCursor: true });
       cancel.on('pointerdown', closeModal);
 
       contentContainer.add([title, sub, hostBtnBox, hostTitle, hostSub, hostHit, joinBtnBox, joinTitle, joinSub, joinHit, cancel]);
+      applyReadableText(this);
     };
 
     // ── VIEW 2: Host Room Setup ───────────────────────────────────────────────
@@ -487,7 +819,7 @@ export class MenuScene extends Phaser.Scene {
       const title = this.add.text(0, -150, 'CREATE ROOM', {
         fontFamily: THEME.fonts.heading,
         fontSize: '20px',
-        color: '#f8fafc',
+        color: THEME.colors.textPrimary,
         fontStyle: 'bold',
         letterSpacing: 2
       }).setOrigin(0.5);
@@ -495,30 +827,30 @@ export class MenuScene extends Phaser.Scene {
       const sub = this.add.text(0, -118, 'Tap box to edit room name on phone keyboard:', {
         fontFamily: THEME.fonts.body,
         fontSize: '11px',
-        color: '#94a3b8'
+        color: THEME.colors.textSecondary
       }).setOrigin(0.5);
 
       const nameBox = this.add.graphics();
-      nameBox.fillStyle(0x0a0c15, 1);
-      nameBox.fillRoundedRect(-140, -88, 280, 56, 12);
-      nameBox.lineStyle(1.8, 0x38bdf8, 0.95);
-      nameBox.strokeRoundedRect(-140, -88, 280, 56, 12);
+      nameBox.fillStyle(THEME.colors.surface, 1);
+      nameBox.fillRect(-modalInputWidth / 2, -88, modalInputWidth, 56);
+      nameBox.lineStyle(1.8, THEME.colors.accent, 0.95);
+      nameBox.strokeRect(-modalInputWidth / 2, -88, modalInputWidth, 56);
 
       const roomText = this.add.text(0, -60, roomName, {
         fontFamily: THEME.fonts.heading,
         fontSize: '26px',
-        color: '#38bdf8',
+        color: THEME.colors.accentHex,
         fontStyle: 'bold',
         letterSpacing: 5
       }).setOrigin(0.5);
 
       const updateDisplay = () => {
         roomText.setText(roomName.length > 0 ? roomName : 'TAP TO TYPE');
-        roomText.setColor(roomName.length > 0 ? '#38bdf8' : '#475569');
+        roomText.setColor(roomName.length > 0 ? THEME.colors.accentHex : THEME.colors.textMuted);
       };
 
       // Tapping the box opens the mobile software keyboard
-      const inputHit = this.add.rectangle(0, -60, 280, 56, 0, 0)
+      const inputHit = this.add.rectangle(0, -60, modalInputWidth, 56, 0, 0)
         .setInteractive({ useHandCursor: true });
       inputHit.on('pointerdown', () => {
         this.attachMobileInput(roomName, 8, (val) => {
@@ -528,10 +860,10 @@ export class MenuScene extends Phaser.Scene {
       });
 
       // Randomize Button
-      const randBtn = this.add.text(0, -12, '🎲 RANDOMIZE NAME', {
+      const randBtn = this.add.text(0, -12, 'RANDOMIZE ROOM NAME', {
         fontFamily: THEME.fonts.body,
         fontSize: '11px',
-        color: '#94a3b8',
+        color: THEME.colors.textSecondary,
         fontStyle: 'bold',
         letterSpacing: 1
       }).setOrigin(0.5).setInteractive({ useHandCursor: true });
@@ -543,18 +875,18 @@ export class MenuScene extends Phaser.Scene {
 
       // Start Hosting Button
       const launchBtnBox = this.add.graphics();
-      launchBtnBox.fillStyle(0x38bdf8, 1);
-      launchBtnBox.fillRoundedRect(-120, 32, 240, 48, 12);
+      launchBtnBox.fillStyle(THEME.colors.accent, 1);
+      launchBtnBox.fillRect(-modalActionWidth / 2, 32, modalActionWidth, 48);
 
       const launchBtnText = this.add.text(0, 56, 'START HOSTING', {
         fontFamily: THEME.fonts.heading,
         fontSize: '14px',
-        color: '#08101c',
+        color: THEME.colors.onAccent,
         fontStyle: 'bold',
         letterSpacing: 1
       }).setOrigin(0.5);
 
-      const launchHit = this.add.rectangle(0, 56, 240, 48, 0, 0)
+      const launchHit = this.add.rectangle(0, 56, modalActionWidth, 48, 0, 0)
         .setInteractive({ useHandCursor: true });
 
       launchHit.on('pointerdown', () => {
@@ -567,12 +899,13 @@ export class MenuScene extends Phaser.Scene {
       const back = this.add.text(0, 155, '← Back', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#64748b',
+        color: THEME.colors.textMuted,
         fontStyle: 'bold'
       }).setOrigin(0.5).setInteractive({ useHandCursor: true });
       back.on('pointerdown', showChoiceView);
 
       contentContainer.add([title, sub, nameBox, roomText, inputHit, randBtn, launchBtnBox, launchBtnText, launchHit, back]);
+      applyReadableText(this);
     };
 
     // ── VIEW 3: Host Waiting View ─────────────────────────────────────────────
@@ -583,7 +916,7 @@ export class MenuScene extends Phaser.Scene {
       const title = this.add.text(0, -150, 'ROOM LIVE', {
         fontFamily: THEME.fonts.heading,
         fontSize: '20px',
-        color: '#f8fafc',
+        color: THEME.colors.textPrimary,
         fontStyle: 'bold',
         letterSpacing: 2
       }).setOrigin(0.5);
@@ -591,65 +924,65 @@ export class MenuScene extends Phaser.Scene {
       const sub = this.add.text(0, -118, 'Your friend must enter this exact Room Name:', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#94a3b8'
+        color: THEME.colors.textSecondary
       }).setOrigin(0.5);
 
       const codePlate = this.add.graphics();
-      codePlate.fillStyle(0x0a0c15, 1);
-      codePlate.fillRoundedRect(-150, -85, 300, 56, 12);
-      codePlate.lineStyle(2, 0x38bdf8, 1);
-      codePlate.strokeRoundedRect(-150, -85, 300, 56, 12);
+      codePlate.fillStyle(THEME.colors.surface, 1);
+      codePlate.fillRect(-modalCodeWidth / 2, -85, modalCodeWidth, 56);
+      codePlate.lineStyle(2, THEME.colors.accent, 1);
+      codePlate.strokeRect(-modalCodeWidth / 2, -85, modalCodeWidth, 56);
 
       const codeText = this.add.text(0, -57, finalRoomName, {
         fontFamily: THEME.fonts.heading,
         fontSize: '28px',
-        color: '#38bdf8',
+        color: THEME.colors.accentHex,
         fontStyle: 'bold',
         letterSpacing: 6
       }).setOrigin(0.5);
 
       // Copy Button
       const copyBtnBox = this.add.graphics();
-      copyBtnBox.fillStyle(0x1e293b, 1);
-      copyBtnBox.fillRoundedRect(-120, -10, 240, 42, 10);
-      copyBtnBox.lineStyle(1.2, 0x38bdf8, 0.8);
-      copyBtnBox.strokeRoundedRect(-120, -10, 240, 42, 10);
+      copyBtnBox.fillStyle(THEME.colors.surfaceRaised, 1);
+      copyBtnBox.fillRect(-modalActionWidth / 2, -10, modalActionWidth, 42);
+      copyBtnBox.lineStyle(1.2, THEME.colors.accent, 0.9);
+      copyBtnBox.strokeRect(-modalActionWidth / 2, -10, modalActionWidth, 42);
 
-      const copyBtnText = this.add.text(0, 11, '📋 COPY ROOM NAME', {
+      const copyBtnText = this.add.text(0, 11, 'COPY ROOM NAME', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#38bdf8',
+        color: THEME.colors.accentHex,
         fontStyle: 'bold',
         letterSpacing: 1
       }).setOrigin(0.5);
 
-      const copyHit = this.add.rectangle(0, 11, 240, 42, 0, 0)
+      const copyHit = this.add.rectangle(0, 11, modalActionWidth, 42, 0, 0)
         .setInteractive({ useHandCursor: true });
 
       copyHit.on('pointerdown', () => {
         if (navigator.clipboard) {
           navigator.clipboard.writeText(finalRoomName).then(() => {
             copyBtnBox.clear();
-            copyBtnBox.fillStyle(0x14532d, 1);
-            copyBtnBox.fillRoundedRect(-120, -10, 240, 42, 10);
-            copyBtnBox.lineStyle(1.2, 0x4ade80, 1);
-            copyBtnBox.strokeRoundedRect(-120, -10, 240, 42, 10);
-            copyBtnText.setText('✓ COPIED!');
-            copyBtnText.setColor('#4ade80');
+            copyBtnBox.fillStyle(THEME.colors.success, 1);
+            copyBtnBox.fillRect(-modalActionWidth / 2, -10, modalActionWidth, 42);
+            copyBtnBox.lineStyle(1.2, THEME.colors.success, 1);
+            copyBtnBox.strokeRect(-modalActionWidth / 2, -10, modalActionWidth, 42);
+            copyBtnText.setText('ROOM NAME COPIED');
+            copyBtnText.setColor(THEME.colors.onAccent);
             this.time.delayedCall(2000, () => {
               copyBtnBox.clear();
-              copyBtnBox.fillStyle(0x1e293b, 1);
-              copyBtnBox.fillRoundedRect(-120, -10, 240, 42, 10);
-              copyBtnBox.lineStyle(1.2, 0x38bdf8, 0.8);
-              copyBtnBox.strokeRoundedRect(-120, -10, 240, 42, 10);
-              copyBtnText.setText('📋 COPY ROOM NAME');
-              copyBtnText.setColor('#38bdf8');
+              copyBtnBox.fillStyle(THEME.colors.surfaceRaised, 1);
+              copyBtnBox.fillRect(-modalActionWidth / 2, -10, modalActionWidth, 42);
+              copyBtnBox.lineStyle(1.2, THEME.colors.accent, 0.9);
+              copyBtnBox.strokeRect(-modalActionWidth / 2, -10, modalActionWidth, 42);
+              copyBtnText.setText('COPY ROOM NAME');
+              copyBtnText.setColor(THEME.colors.accentHex);
             });
           }).catch(() => {});
         }
       });
 
-      const waitingDot = this.add.circle(-115, 72, 6, 0x4ade80);
+      const waitingDot = this.add.circle(-115, 72, 6, THEME.colors.success);
       this.tweens.add({
         targets: waitingDot,
         alpha: { from: 1, to: 0.2 },
@@ -661,14 +994,14 @@ export class MenuScene extends Phaser.Scene {
       const waitingText = this.add.text(0, 72, 'Waiting for guest to join...', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#4ade80',
+        color: THEME.colors.successHex,
         fontStyle: 'bold'
       }).setOrigin(0.5);
 
       const cancelBtn = this.add.text(0, 155, 'Cancel Room', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#64748b',
+        color: THEME.colors.textMuted,
         fontStyle: 'bold'
       }).setOrigin(0.5).setInteractive({ useHandCursor: true });
       cancelBtn.on('pointerdown', () => {
@@ -678,6 +1011,7 @@ export class MenuScene extends Phaser.Scene {
       });
 
       contentContainer.add([title, sub, codePlate, codeText, copyBtnBox, copyBtnText, copyHit, waitingDot, waitingText, cancelBtn]);
+      applyReadableText(this);
 
       this.pendingNetController = new NetworkController(true, finalRoomName);
       try {
@@ -688,7 +1022,7 @@ export class MenuScene extends Phaser.Scene {
         this.scene.start('GameScene', { network: net, localPlayerId: 1 });
       } catch (err) {
         waitingText.setText('Error initializing room. Check WebSockets.');
-        waitingText.setColor('#f87171');
+        waitingText.setColor(THEME.colors.dangerHex);
       }
     };
 
@@ -700,7 +1034,7 @@ export class MenuScene extends Phaser.Scene {
       const title = this.add.text(0, -150, 'JOIN ROOM', {
         fontFamily: THEME.fonts.heading,
         fontSize: '20px',
-        color: '#f8fafc',
+        color: THEME.colors.textPrimary,
         fontStyle: 'bold',
         letterSpacing: 2
       }).setOrigin(0.5);
@@ -708,19 +1042,19 @@ export class MenuScene extends Phaser.Scene {
       const sub = this.add.text(0, -118, 'Tap box to type room name on phone keyboard:', {
         fontFamily: THEME.fonts.body,
         fontSize: '11px',
-        color: '#94a3b8'
+        color: THEME.colors.textSecondary
       }).setOrigin(0.5);
 
       const inputBox = this.add.graphics();
-      inputBox.fillStyle(0x0a0c15, 1);
-      inputBox.fillRoundedRect(-140, -88, 280, 56, 12);
-      inputBox.lineStyle(1.8, 0xf87171, 0.95);
-      inputBox.strokeRoundedRect(-140, -88, 280, 56, 12);
+      inputBox.fillStyle(THEME.colors.surface, 1);
+      inputBox.fillRect(-modalInputWidth / 2, -88, modalInputWidth, 56);
+      inputBox.lineStyle(1.8, THEME.colors.danger, 0.95);
+      inputBox.strokeRect(-modalInputWidth / 2, -88, modalInputWidth, 56);
 
       const displayCodeText = this.add.text(0, -60, 'TAP TO TYPE', {
         fontFamily: THEME.fonts.heading,
         fontSize: '22px',
-        color: '#475569',
+        color: THEME.colors.textMuted,
         fontStyle: 'bold',
         letterSpacing: 4
       }).setOrigin(0.5);
@@ -728,14 +1062,14 @@ export class MenuScene extends Phaser.Scene {
       const updateInputDisplay = () => {
         if (typedCode.length === 0) {
           displayCodeText.setText('TAP TO TYPE');
-          displayCodeText.setColor('#475569');
+          displayCodeText.setColor(THEME.colors.textMuted);
         } else {
           displayCodeText.setText(typedCode);
-          displayCodeText.setColor('#f87171');
+          displayCodeText.setColor(THEME.colors.dangerHex);
         }
       };
 
-      const inputHit = this.add.rectangle(0, -60, 280, 56, 0, 0)
+      const inputHit = this.add.rectangle(0, -60, modalInputWidth, 56, 0, 0)
         .setInteractive({ useHandCursor: true });
       inputHit.on('pointerdown', () => {
         this.attachMobileInput(typedCode, 8, (val) => {
@@ -746,20 +1080,20 @@ export class MenuScene extends Phaser.Scene {
 
       // Paste Button
       const pasteBtnBox = this.add.graphics();
-      pasteBtnBox.fillStyle(0x1e293b, 1);
-      pasteBtnBox.fillRoundedRect(-110, -14, 220, 36, 8);
-      pasteBtnBox.lineStyle(1.2, 0x38bdf8, 0.8);
-      pasteBtnBox.strokeRoundedRect(-110, -14, 220, 36, 8);
+      pasteBtnBox.fillStyle(THEME.colors.surfaceRaised, 1);
+      pasteBtnBox.fillRect(-modalPasteWidth / 2, -14, modalPasteWidth, 36);
+      pasteBtnBox.lineStyle(1.2, THEME.colors.accent, 0.9);
+      pasteBtnBox.strokeRect(-modalPasteWidth / 2, -14, modalPasteWidth, 36);
 
-      const pasteBtnText = this.add.text(0, 4, '📋 PASTE ROOM NAME', {
+      const pasteBtnText = this.add.text(0, 4, 'PASTE ROOM NAME', {
         fontFamily: THEME.fonts.body,
         fontSize: '11px',
-        color: '#38bdf8',
+        color: THEME.colors.accentHex,
         fontStyle: 'bold',
         letterSpacing: 1
       }).setOrigin(0.5);
 
-      const pasteHit = this.add.rectangle(0, 4, 220, 36, 0, 0)
+      const pasteHit = this.add.rectangle(0, 4, modalPasteWidth, 36, 0, 0)
         .setInteractive({ useHandCursor: true });
 
       pasteHit.on('pointerdown', async () => {
@@ -778,23 +1112,23 @@ export class MenuScene extends Phaser.Scene {
       const statusLabel = this.add.text(0, 34, '', {
         fontFamily: THEME.fonts.body,
         fontSize: '11px',
-        color: '#f87171',
+        color: THEME.colors.dangerHex,
         align: 'center'
       }).setOrigin(0.5);
 
       const connectBtnBox = this.add.graphics();
-      connectBtnBox.fillStyle(0xf87171, 1);
-      connectBtnBox.fillRoundedRect(-120, 58, 240, 46, 12);
+      connectBtnBox.fillStyle(THEME.colors.danger, 1);
+      connectBtnBox.fillRect(-modalActionWidth / 2, 58, modalActionWidth, 46);
 
       const connectBtnText = this.add.text(0, 81, 'CONNECT & JOIN', {
         fontFamily: THEME.fonts.heading,
         fontSize: '14px',
-        color: '#08101c',
+        color: THEME.colors.onAccent,
         fontStyle: 'bold',
         letterSpacing: 1
       }).setOrigin(0.5);
 
-      const connectHit = this.add.rectangle(0, 81, 240, 46, 0, 0)
+      const connectHit = this.add.rectangle(0, 81, modalActionWidth, 46, 0, 0)
         .setInteractive({ useHandCursor: true });
 
       const handleConnect = async () => {
@@ -806,7 +1140,7 @@ export class MenuScene extends Phaser.Scene {
         this.removeMobileInput();
         connectHit.disableInteractive();
         statusLabel.setText(`Connecting to ${typedCode}...`);
-        statusLabel.setColor('#38bdf8');
+        statusLabel.setColor(THEME.colors.accentHex);
 
         this.pendingNetController = new NetworkController(false, typedCode);
         try {
@@ -821,7 +1155,7 @@ export class MenuScene extends Phaser.Scene {
             ? 'Room not found! Verify name and ensure Host is waiting.'
             : 'Connection timed out. Check network.';
           statusLabel.setText(msg);
-          statusLabel.setColor('#f87171');
+          statusLabel.setColor(THEME.colors.dangerHex);
           connectHit.setInteractive({ useHandCursor: true });
         }
       };
@@ -831,12 +1165,13 @@ export class MenuScene extends Phaser.Scene {
       const backBtn = this.add.text(0, 155, '← Back', {
         fontFamily: THEME.fonts.body,
         fontSize: '12px',
-        color: '#64748b',
+        color: THEME.colors.textMuted,
         fontStyle: 'bold'
       }).setOrigin(0.5).setInteractive({ useHandCursor: true });
       backBtn.on('pointerdown', showChoiceView);
 
       contentContainer.add([title, sub, inputBox, displayCodeText, inputHit, pasteBtnBox, pasteBtnText, pasteHit, statusLabel, connectBtnBox, connectBtnText, connectHit, backBtn]);
+      applyReadableText(this);
     };
 
     showChoiceView();

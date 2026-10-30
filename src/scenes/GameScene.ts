@@ -23,7 +23,8 @@ import {
   getCellCenter,
   getIntersectionCenter
 } from '../config/BoardLayout';
-import { THEME, mixColor } from '../config/Theme';
+import { applyReadableText, fitCameraToViewport, SceneViewport } from '../config/ResponsiveCanvas';
+import { THEME } from '../config/Theme';
 
 export interface GameSceneData {
   difficulty?: Difficulty;
@@ -41,6 +42,31 @@ export class GameScene extends Phaser.Scene {
   private readonly wallGap  = BOARD_LAYOUT.WALL_GAP;
   private readonly bX       = BOARD_LAYOUT.BOARD_START_X;
   private readonly bY       = BOARD_LAYOUT.BOARD_START_Y;
+
+  private viewport: SceneViewport = { width: 800, height: 800, zoom: 1 };
+  private hudHeight = 68;
+  private boardScale = 1;
+  private boardOffsetX = 0;
+  private boardOffsetY = 0;
+  private boardLayer!: Phaser.GameObjects.Container;
+  private backgroundGfx!: Phaser.GameObjects.Graphics;
+  private boardPlateGfx!: Phaser.GameObjects.Graphics;
+  private topBarGfx!: Phaser.GameObjects.Graphics;
+  private hudPillX = 0;
+  private hudPillWidth = 0;
+  private playerOneChip!: Phaser.GameObjects.Container;
+  private playerTwoChip!: Phaser.GameObjects.Container;
+  private exitButton!: Phaser.GameObjects.Text;
+  private bottomBar!: Phaser.GameObjects.Container;
+  private bottomBarGfx!: Phaser.GameObjects.Graphics;
+  private modeText!: Phaser.GameObjects.Text;
+  private obstacleHit!: Phaser.GameObjects.Rectangle;
+  private orientationHit!: Phaser.GameObjects.Rectangle;
+  private obstacleCenterX = 0;
+  private orientationCenterX = 0;
+  private buttonCenterY = 0;
+  private buttonWidth = 0;
+  private bottomBarHeight = 98;
 
   private player1Token!: Phaser.GameObjects.Container;
   private cpuToken!: Phaser.GameObjects.Container;
@@ -69,6 +95,7 @@ export class GameScene extends Phaser.Scene {
   constructor() { super({ key: 'GameScene' }); }
 
   create(data?: GameSceneData): void {
+    this.viewport = fitCameraToViewport(this);
     this.board = new Board();
     this.animating = false;
     this.activeOrientation = 'H';
@@ -77,6 +104,7 @@ export class GameScene extends Phaser.Scene {
 
     this.networkController = data?.network ?? null;
     this.localPlayerId = data?.localPlayerId ?? 1;
+    this.boardLayer = this.add.container(0, 0).setDepth(5);
 
     let controller: OpponentController;
     if (this.networkController) {
@@ -103,10 +131,71 @@ export class GameScene extends Phaser.Scene {
     this.placedWallsGfx = this.add.graphics().setDepth(6);
     this.wallPreviewGfx = this.add.graphics().setDepth(15);
     this.highlightContainer = this.add.container(0, 0).setDepth(5);
+    this.boardLayer.add([this.placedWallsGfx, this.wallPreviewGfx, this.highlightContainer]);
     this.bannerContainer = this.add.container(0, 0).setDepth(50);
+
+    this.layoutResponsiveScene();
+    this.scale.on('resize', this.handleResize, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off('resize', this.handleResize, this);
+    });
 
     this.turnManager.start();
     this.refreshMoveHighlights();
+    applyReadableText(this);
+  }
+
+  private handleResize(): void {
+    this.viewport = fitCameraToViewport(this);
+    this.layoutResponsiveScene();
+    applyReadableText(this);
+  }
+
+  private layoutResponsiveScene(): void {
+    const narrow = this.viewport.width < 620;
+    const shortWide = !narrow && this.viewport.height < 500;
+    this.hudHeight = narrow ? 112 : (shortWide ? 56 : 68);
+    this.bottomBarHeight = narrow ? 122 : (shortWide ? 80 : 104);
+    this.boardScale = Math.min(
+      1.2,
+      (this.viewport.width - 24) / 688,
+      (this.viewport.height - this.hudHeight - this.bottomBarHeight - 12) / 682
+    );
+    this.boardOffsetX = this.viewport.width / 2 - 400 * this.boardScale;
+    const boardCenterY = this.hudHeight + (this.viewport.height - this.hudHeight - this.bottomBarHeight) / 2;
+    this.boardOffsetY = boardCenterY - 402 * this.boardScale;
+    this.boardLayer.setPosition(this.boardOffsetX, this.boardOffsetY).setScale(this.boardScale);
+
+    if (this.backgroundGfx) {
+      this.backgroundGfx.clear();
+      this.backgroundGfx.fillStyle(THEME.colors.bg, 1);
+      this.backgroundGfx.fillRect(0, 0, this.viewport.width, this.viewport.height);
+      this.backgroundGfx.lineStyle(1, THEME.colors.border, 0.07);
+      for (let i = 0; i < 7; i++) {
+        this.backgroundGfx.strokeEllipse(
+          this.viewport.width / 2,
+          this.viewport.height / 2,
+          460 + i * 48,
+          320 + i * 38
+        );
+      }
+    }
+
+    if (this.boardPlateGfx) {
+      const boardW = 9 * this.cellSize + 8 * this.wallGap;
+      this.boardPlateGfx.clear();
+      this.boardPlateGfx.fillStyle(THEME.colors.surface, 1);
+      this.boardPlateGfx.fillRect(this.bX - 14, this.bY - 11, boardW + 28, boardW + 22);
+      this.boardPlateGfx.lineStyle(2, THEME.colors.border, 1);
+      this.boardPlateGfx.strokeRect(this.bX - 14, this.bY - 11, boardW + 28, boardW + 22);
+    }
+
+    if (this.topBarGfx) this.layoutTopHUD();
+    if (this.bottomBar) {
+      this.layoutBottomBar();
+      this.drawObstacleButton();
+      this.drawOrientationButton();
+    }
   }
 
   private onTurnEvent(e: TurnManagerEvent): void {
@@ -138,7 +227,7 @@ export class GameScene extends Phaser.Scene {
         this.showBanner(
           this.localPlayerId === 1 ? 'VICTORY!' : 'DEFEAT',
           this.localPlayerId === 1 ? 'You reached the opposite edge first.' : 'Player 1 reached the goal first.',
-          this.localPlayerId === 1 ? 0x4ade80 : 0xf87171
+          this.localPlayerId === 1 ? THEME.colors.success : THEME.colors.danger
         );
         break;
 
@@ -146,7 +235,7 @@ export class GameScene extends Phaser.Scene {
         this.showBanner(
           this.localPlayerId === 2 ? 'VICTORY!' : 'DEFEAT',
           this.localPlayerId === 2 ? 'You reached the opposite edge first.' : 'Player 2 reached the goal first.',
-          this.localPlayerId === 2 ? 0x4ade80 : 0xf87171
+          this.localPlayerId === 2 ? THEME.colors.success : THEME.colors.danger
         );
         break;
     }
@@ -157,13 +246,15 @@ export class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private getNearestIntersection(x: number, y: number): { row: number; col: number } | null {
+    const boardX = (x - this.boardOffsetX) / this.boardScale;
+    const boardY = (y - this.boardOffsetY) / this.boardScale;
     let bestDist = Infinity;
     let bestSlot: { row: number; col: number } | null = null;
 
     for (let r = 1; r < GRID_SIZE; r += 2) {
       for (let c = 1; c < GRID_SIZE; c += 2) {
         const center = getIntersectionCenter(r, c);
-        const dist = Phaser.Math.Distance.Between(x, y, center.x, center.y);
+        const dist = Phaser.Math.Distance.Between(boardX, boardY, center.x, center.y);
         if (dist < bestDist) {
           bestDist = dist;
           bestSlot = { row: r, col: c };
@@ -176,7 +267,9 @@ export class GameScene extends Phaser.Scene {
   private setupGlobalPointer(): void {
     // 1. Pointer Down: Click to aim / Double-click to place
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.isObstacleMode && pointer.y > 64 && pointer.y < 746) {
+      const boardY = (pointer.y - this.boardOffsetY) / this.boardScale;
+      if (this.isObstacleMode && boardY > 64 && boardY < 746
+        && pointer.y < this.viewport.height - this.bottomBarHeight) {
         const slot = this.getNearestIntersection(pointer.x, pointer.y);
         if (slot) {
           // If tapping the already selected obstacle -> DOUBLE CLICK: Place it!
@@ -192,7 +285,9 @@ export class GameScene extends Phaser.Scene {
 
     // 2. Pointer Move: Drag to slide preview smoothly across slots
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.isDown && this.isObstacleMode && pointer.y > 64 && pointer.y < 746) {
+      const boardY = (pointer.y - this.boardOffsetY) / this.boardScale;
+      if (pointer.isDown && this.isObstacleMode && boardY > 64 && boardY < 746
+        && pointer.y < this.viewport.height - this.bottomBarHeight) {
         const slot = this.getNearestIntersection(pointer.x, pointer.y);
         if (slot && (!this.selectedWallSlot || this.selectedWallSlot.row !== slot.row || this.selectedWallSlot.col !== slot.col)) {
           this.selectWallSlot(slot.row, slot.col);
@@ -238,7 +333,7 @@ export class GameScene extends Phaser.Scene {
     if (!p1ok || !cpuOk) {
       rollback();
       this.flashReject(row, col, orientation);
-      this.showTemporaryToast('Illegal! Wall would trap a player.', 0xf87171);
+      this.showTemporaryToast('Invalid wall. Both players need an open route.', THEME.colors.danger);
       return false;
     }
 
@@ -248,7 +343,7 @@ export class GameScene extends Phaser.Scene {
     const action: GameAction = { type: 'WALL', coords: [row, col], orientation };
     this.networkController?.sendAction(action);
 
-    this.drawWall(row, col, orientation, this.localPlayerId === 1 ? 0x38bdf8 : 0xf87171);
+    this.drawWall(row, col, orientation, this.localPlayerId === 1 ? THEME.colors.accent : THEME.colors.danger);
     this.hideWallPreview();
     this.turnManager.onLocalActionComplete(action);
     return true;
@@ -271,19 +366,20 @@ export class GameScene extends Phaser.Scene {
     const turnLabel = isMyTurn ? 'YOUR TURN' : (this.networkController ? 'OPPONENT' : 'CPU');
     this.hudTurnText.setText(`${turnLabel} · ${seconds}s`);
 
+    const pillY = this.viewport.width < 540 ? 65 : 14;
     this.hudTurnPillGfx.clear();
     this.hudTurnPillGfx.fillStyle(THEME.colors.surfaceRaised, 1);
-    this.hudTurnPillGfx.fillRoundedRect(220, 14, 360, 36, 18);
+    this.hudTurnPillGfx.fillRect(this.hudPillX, pillY, this.hudPillWidth, 36);
 
     const borderColor = isWarning
       ? THEME.colors.danger
-      : (isMyTurn ? THEME.colors.accent : 0xa855f7);
+      : (isMyTurn ? THEME.colors.accent : THEME.colors.danger);
     const textHex = isWarning
       ? THEME.colors.dangerHex
-      : (isMyTurn ? THEME.colors.accentHex : '#c084fc');
+      : (isMyTurn ? THEME.colors.accentHex : THEME.colors.dangerHex);
 
-    this.hudTurnPillGfx.lineStyle(1.8, borderColor, isWarning ? 1 : 0.75);
-    this.hudTurnPillGfx.strokeRoundedRect(220, 14, 360, 36, 18);
+    this.hudTurnPillGfx.lineStyle(1.5, borderColor, isWarning ? 1 : 0.85);
+    this.hudTurnPillGfx.strokeRect(this.hudPillX, pillY, this.hudPillWidth, 36);
 
     this.hudTurnText.setColor(textHex);
     this.hudTurnDot.setFillStyle(borderColor, 1);
@@ -309,22 +405,28 @@ export class GameScene extends Phaser.Scene {
     this.drawObstacleButton();
     this.clearWallSelection();
     this.networkController?.sendAction({ type: 'TIMEOUT' });
-    this.showTemporaryToast('⏰ TIME EXPIRED! Turn skipped.', 0xf87171);
+    this.showTemporaryToast('Time expired. Your turn was skipped.', THEME.colors.danger);
   }
 
   private showTemporaryToast(msg: string, color: number): void {
-    const toast = this.add.container(400, 120).setDepth(40);
+    const mobile = this.viewport.width < 620;
+    const toastWidth = Math.min(520, this.viewport.width - 32);
+    const toastHeight = mobile ? 72 : 56;
+    const toastY = mobile ? this.hudHeight + 40 : 120;
+    const toast = this.add.container(this.viewport.width / 2, toastY).setDepth(40);
     const bg = this.add.graphics();
-    bg.fillStyle(0x0a0c15, 0.95);
-    bg.fillRoundedRect(-180, -18, 360, 36, 18);
-    bg.lineStyle(1.5, color, 1);
-    bg.strokeRoundedRect(-180, -18, 360, 36, 18);
+    bg.fillStyle(THEME.colors.border, 1);
+    bg.fillRect(-toastWidth / 2, -toastHeight / 2, toastWidth, toastHeight);
+    bg.lineStyle(1, color, 1);
+    bg.strokeRect(-toastWidth / 2, -toastHeight / 2, toastWidth, toastHeight);
 
     const txt = this.add.text(0, 0, msg, {
       fontFamily: THEME.fonts.heading,
-      fontSize: '12px',
-      color: '#' + color.toString(16).padStart(6, '0'),
-      fontStyle: 'bold'
+      fontSize: '16px',
+      color: Phaser.Display.Color.IntegerToColor(color).rgba,
+      fontStyle: 'bold',
+      align: 'center',
+      wordWrap: { width: toastWidth - 24 }
     }).setOrigin(0.5);
 
     toast.add([bg, txt]);
@@ -345,85 +447,133 @@ export class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private buildBackground(): void {
-    const gfx = this.add.graphics();
-    gfx.fillStyle(THEME.colors.bg, 1);
-    gfx.fillRect(0, 0, 800, 800);
+    this.backgroundGfx = this.add.graphics();
+    this.boardPlateGfx = this.add.graphics();
+    this.boardLayer.add(this.boardPlateGfx);
+    this.layoutResponsiveScene();
+  }
 
-    const BANDS = 40;
-    const bandH = 800 / BANDS;
-    for (let i = 0; i < BANDS; i++) {
-      gfx.fillStyle(mixColor(0x10162b, THEME.colors.bgDeep, i / (BANDS - 1)), 1);
-      gfx.fillRect(0, i * bandH, 800, bandH + 1);
+  private layoutTopHUD(): void {
+    const centerX = this.viewport.width / 2;
+    const rightEdge = this.viewport.width;
+    const mobile = this.viewport.width < 540;
+    const shortWide = !mobile && this.viewport.height < 500;
+    const pillWidth = Math.min(360, this.viewport.width * 0.42);
+    this.hudPillWidth = pillWidth;
+    this.hudPillX = centerX - pillWidth / 2;
+
+    this.topBarGfx.clear();
+    this.topBarGfx.fillStyle(THEME.colors.border, 1);
+    this.topBarGfx.fillRect(0, 0, this.viewport.width, this.hudHeight);
+    this.topBarGfx.lineStyle(1, THEME.colors.borderSoft, 1);
+    this.topBarGfx.lineBetween(0, this.hudHeight, this.viewport.width, this.hudHeight);
+
+    if (mobile) {
+      const mobilePillWidth = Math.min(220, this.viewport.width * 0.64);
+      this.hudPillWidth = mobilePillWidth;
+      this.hudPillX = centerX - mobilePillWidth / 2;
+      this.hudTurnPillGfx.clear();
+      this.hudTurnPillGfx.fillStyle(THEME.colors.bg, 1);
+      this.hudTurnPillGfx.fillRect(this.hudPillX, 65, mobilePillWidth, 36);
+      this.hudTurnPillGfx.lineStyle(1, THEME.colors.borderSoft, 1);
+      this.hudTurnPillGfx.strokeRect(this.hudPillX, 65, mobilePillWidth, 36);
+      this.hudTurnDot.setPosition(this.hudPillX + 18, 83);
+      this.hudTurnText.setPosition(centerX + 16, 83);
+      this.playerOneChip.setPosition(12, 27);
+      this.playerTwoChip.setPosition(rightEdge - 12, 27);
+      this.layoutPips(this.p1Pips, 'left', true);
+      this.layoutPips(this.cpuPips, 'right', true);
+      this.exitButton.setPosition(rightEdge - 12, 83);
+      return;
     }
 
-    const boardW = 9 * this.cellSize + 8 * this.wallGap;
-    const plateX = this.bX - 14;
-    const plateY = this.bY - 11;
-    gfx.fillStyle(THEME.colors.surface, 1);
-    gfx.fillRoundedRect(plateX, plateY, boardW + 28, boardW + 22, 16);
-    gfx.lineStyle(1.5, THEME.colors.border, 1);
-    gfx.strokeRoundedRect(plateX, plateY, boardW + 28, boardW + 22, 16);
+    this.hudTurnPillGfx.clear();
+    this.hudTurnPillGfx.fillStyle(THEME.colors.bg, 1);
+    this.hudTurnPillGfx.fillRect(this.hudPillX, 14, pillWidth, 36);
+    this.hudTurnPillGfx.lineStyle(1, THEME.colors.borderSoft, 1);
+    this.hudTurnPillGfx.strokeRect(this.hudPillX, 14, pillWidth, 36);
+    this.hudTurnDot.setPosition(this.hudPillX + 24, 32);
+    this.hudTurnText.setPosition(centerX + 8, 32);
+    this.playerOneChip.setPosition(16, 32);
+    this.playerTwoChip.setPosition(rightEdge - 16, 32);
+    this.layoutPips(this.p1Pips, 'left', false);
+    this.layoutPips(this.cpuPips, 'right', false);
+    this.exitButton.setPosition(rightEdge - 16, shortWide ? 48 : 55);
+  }
+
+  private layoutPips(pips: Phaser.GameObjects.Arc[], side: 'left' | 'right', mobile: boolean): void {
+    pips.forEach((pip, index) => {
+      const start = mobile ? 62 : 68;
+      const spacing = mobile ? 6 : 13;
+      const direction = side === 'left' ? 1 : -1;
+      pip.setPosition(direction * (start + index * spacing), 0);
+      pip.setScale(mobile ? 0.6 : 1);
+    });
   }
 
   private buildTopHUD(): void {
-    const topBar = this.add.graphics().setDepth(20);
-    topBar.fillStyle(THEME.colors.surface, 1);
-    topBar.fillRect(0, 0, 800, 64);
-    topBar.lineStyle(1, THEME.colors.borderSoft, 1);
-    topBar.lineBetween(0, 64, 800, 64);
-
+    this.topBarGfx = this.add.graphics().setDepth(20);
     this.hudTurnPillGfx = this.add.graphics().setDepth(21);
-    this.hudTurnDot = this.add.circle(248, 32, 5, THEME.colors.accent).setDepth(22);
-    this.hudTurnText = this.add.text(400, 32, `YOUR TURN · ${TURN_TIME_LIMIT}s`, {
+    this.hudTurnDot = this.add.circle(0, 0, 6, THEME.colors.accent).setDepth(22);
+    this.hudTurnText = this.add.text(0, 0, `YOUR TURN · ${TURN_TIME_LIMIT}s`, {
       fontFamily: THEME.fonts.heading,
-      fontSize: '13px',
+      fontSize: '18px',
       color: THEME.colors.textPrimary,
       fontStyle: 'bold',
-      letterSpacing: 1
+      letterSpacing: 0.4
     }).setOrigin(0.5).setDepth(22);
 
     const p1Label = this.localPlayerId === 1 ? 'YOU' : 'P1';
     const p2Label = this.networkController ? (this.localPlayerId === 2 ? 'YOU' : 'P2') : 'CPU';
+    const playerOne = this.buildChip(p1Label, THEME.colors.accent, 'left');
+    const playerTwo = this.buildChip(p2Label, THEME.colors.danger, 'right');
+    this.playerOneChip = playerOne.container;
+    this.playerTwoChip = playerTwo.container;
+    this.p1Pips = playerOne.pips;
+    this.cpuPips = playerTwo.pips;
 
-    this.p1Pips = this.buildChip(16, 32, p1Label, THEME.colors.accent, 'left');
-    this.cpuPips = this.buildChip(784, 32, p2Label, THEME.colors.danger, 'right');
-
-    const menuBtn = this.add.text(784, 18, 'EXIT', {
+    this.exitButton = this.add.text(0, 0, 'EXIT', {
       fontFamily: THEME.fonts.heading,
-      fontSize: '10px',
-      color: THEME.colors.textMuted,
+      fontSize: '14px',
+      color: THEME.colors.onAccent,
       fontStyle: 'bold'
     }).setOrigin(1, 0.5).setDepth(25).setInteractive({ useHandCursor: true });
 
-    menuBtn.on('pointerdown', () => {
+    this.exitButton.on('pointerdown', () => {
       this.turnManager.stopTimer();
       this.networkController?.disconnect();
       this.scene.start('MenuScene');
     });
+
+    this.layoutTopHUD();
   }
 
-  private buildChip(x: number, y: number, label: string, color: number, side: 'left' | 'right'): Phaser.GameObjects.Arc[] {
-    const depth = 21;
-    const g = this.add.graphics().setDepth(depth);
-    const avX = side === 'left' ? x + 11 : x - 11;
-    g.fillStyle(color, 1);
-    g.fillCircle(avX, y, 6);
-
-    const labelX = side === 'left' ? x + 24 : x - 24;
-    this.add.text(labelX, y, label, {
+  private buildChip(
+    label: string,
+    color: number,
+    side: 'left' | 'right'
+  ): { container: Phaser.GameObjects.Container; pips: Phaser.GameObjects.Arc[] } {
+    const container = this.add.container(0, 0).setDepth(21);
+    const iconX = side === 'left' ? 11 : -11;
+    const labelX = side === 'left' ? 24 : -24;
+    const pipStart = side === 'left' ? 68 : -68;
+    const iconGfx = this.add.graphics();
+    iconGfx.fillStyle(color, 1);
+    iconGfx.fillCircle(iconX, 0, 7);
+    const playerLabel = this.add.text(labelX, 0, label, {
       fontFamily: THEME.fonts.heading,
-      fontSize: '11px',
-      color: THEME.colors.textPrimary,
+      fontSize: '16px',
+      color: THEME.colors.onAccent,
       fontStyle: 'bold'
-    }).setOrigin(side === 'left' ? 0 : 1, 0.5).setDepth(depth);
+    }).setOrigin(side === 'left' ? 0 : 1, 0.5);
 
-    const pipStart = side === 'left' ? x + 68 : x - 68;
     const pips: Phaser.GameObjects.Arc[] = [];
     for (let i = 0; i < INITIAL_WALLS; i++) {
-      const px = side === 'left' ? pipStart + i * 11 : pipStart - i * 11;
-      pips.push(this.add.circle(px, y, 4, color, 1).setDepth(depth));
+      const x = side === 'left' ? pipStart + i * 13 : pipStart - i * 13;
+      pips.push(this.add.circle(x, 0, 5, color, 1));
     }
-    return pips;
+    container.add([iconGfx, playerLabel, ...pips]);
+    return { container, pips };
   }
 
   // ---------------------------------------------------------------------------
@@ -431,70 +581,117 @@ export class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private buildMobileBottomBar(difficulty?: Difficulty): void {
-    const bar = this.add.container(0, 746).setDepth(20);
-
-    const bg = this.add.graphics();
-    bg.fillStyle(THEME.colors.surface, 1);
-    bg.fillRect(0, 0, 800, 54);
-    bg.lineStyle(1.5, THEME.colors.borderSoft, 1);
-    bg.lineBetween(0, 0, 800, 0);
-
-    // Button 1: Obstacle Mode Toggle
+    this.bottomBar = this.add.container(0, 0).setDepth(20);
+    this.bottomBarGfx = this.add.graphics();
     this.obstacleBtnGfx = this.add.graphics();
-    this.obstacleBtnText = this.add.text(175, 27, '', {
+    this.obstacleBtnText = this.add.text(0, 0, '', {
       fontFamily: THEME.fonts.heading,
-      fontSize: '13px',
-      fontStyle: 'bold'
+      fontSize: '18px',
+      fontStyle: 'bold',
+      align: 'center',
+      lineSpacing: 0
     }).setOrigin(0.5);
-
-    const obstacleHit = this.add.rectangle(175, 27, 260, 42, 0, 0).setInteractive({ useHandCursor: true });
-    obstacleHit.on('pointerdown', () => this.toggleObstacleMode());
-
-    // Button 2: Orientation Toggle
+    this.obstacleHit = this.add.rectangle(0, 0, 0, 0, 0, 0).setInteractive({ useHandCursor: true });
+    this.obstacleHit.on('pointerdown', () => this.toggleObstacleMode());
     this.flipBtnGfx = this.add.graphics();
-    this.flipBtnText = this.add.text(485, 27, '', {
+    this.flipBtnText = this.add.text(0, 0, '', {
       fontFamily: THEME.fonts.heading,
-      fontSize: '13px',
-      fontStyle: 'bold'
+      fontSize: '18px',
+      fontStyle: 'bold',
+      align: 'center',
+      lineSpacing: 0
     }).setOrigin(0.5);
-
-    const flipHit = this.add.rectangle(485, 27, 260, 42, 0, 0).setInteractive({ useHandCursor: true });
-    flipHit.on('pointerdown', () => this.cycleOrientation());
-
-    // Mode Tag
+    this.orientationHit = this.add.rectangle(0, 0, 0, 0, 0, 0).setInteractive({ useHandCursor: true });
+    this.orientationHit.on('pointerdown', () => this.cycleOrientation());
     const modeTag = this.networkController ? `P2P: ${this.networkController.roomCode}` : (difficulty ?? 'BOT');
-    const modeText = this.add.text(776, 27, modeTag, {
+    this.modeText = this.add.text(0, 0, modeTag, {
       fontFamily: THEME.fonts.body,
-      fontSize: '11px',
+      fontSize: '17px',
       color: THEME.colors.textMuted,
       fontStyle: 'bold'
     }).setOrigin(1, 0.5);
 
-    bar.add([bg, this.obstacleBtnGfx, this.obstacleBtnText, obstacleHit, this.flipBtnGfx, this.flipBtnText, flipHit, modeText]);
+    this.bottomBar.add([
+      this.bottomBarGfx,
+      this.obstacleBtnGfx,
+      this.obstacleBtnText,
+      this.obstacleHit,
+      this.flipBtnGfx,
+      this.flipBtnText,
+      this.orientationHit,
+      this.modeText
+    ]);
 
+    this.layoutBottomBar();
     this.drawObstacleButton();
     this.drawOrientationButton();
+  }
+
+  private layoutBottomBar(): void {
+    const mobile = this.viewport.width < 620;
+    const shortWide = !mobile && this.viewport.height < 500;
+    const centerY = mobile ? 82 : (shortWide ? 40 : 68);
+    this.buttonWidth = mobile
+      ? (this.viewport.width - 40) / 2
+      : Math.min(300, this.viewport.width * 0.36);
+    this.obstacleCenterX = mobile ? this.viewport.width * 0.25 : this.viewport.width * 0.24;
+    this.orientationCenterX = mobile ? this.viewport.width * 0.75 : this.viewport.width * 0.62;
+    this.buttonCenterY = centerY;
+    this.bottomBar.setPosition(0, this.viewport.height - this.bottomBarHeight);
+
+    this.bottomBarGfx.clear();
+    this.bottomBarGfx.fillStyle(THEME.colors.surface, 1);
+    this.bottomBarGfx.fillRect(0, 0, this.viewport.width, this.bottomBarHeight);
+    this.bottomBarGfx.lineStyle(1, THEME.colors.border, 1);
+    this.bottomBarGfx.lineBetween(0, 0, this.viewport.width, 0);
+
+    this.obstacleBtnText.setPosition(this.obstacleCenterX, centerY);
+    this.obstacleHit
+      .removeInteractive()
+      .setPosition(this.obstacleCenterX, centerY)
+      .setSize(this.buttonWidth, 82)
+      .setInteractive(
+        new Phaser.Geom.Rectangle(0, 0, this.buttonWidth, 82),
+        Phaser.Geom.Rectangle.Contains
+      );
+    if (this.obstacleHit.input) this.obstacleHit.input.cursor = 'pointer';
+    this.flipBtnText.setPosition(this.orientationCenterX, centerY);
+    this.orientationHit
+      .removeInteractive()
+      .setPosition(this.orientationCenterX, centerY)
+      .setSize(this.buttonWidth, 82)
+      .setInteractive(
+        new Phaser.Geom.Rectangle(0, 0, this.buttonWidth, 82),
+        Phaser.Geom.Rectangle.Contains
+      );
+    if (this.orientationHit.input) this.orientationHit.input.cursor = 'pointer';
+    this.modeText.setPosition(this.viewport.width - 18, 20);
   }
 
   private drawObstacleButton(): void {
     this.obstacleBtnGfx.clear();
     const active = this.isObstacleMode;
-    const bgCol = active ? 0x1d3557 : THEME.colors.surfaceRaised;
+    const bgCol = active ? THEME.colors.bgDeep : THEME.colors.surfaceRaised;
     const borderCol = active ? THEME.colors.accent : THEME.colors.border;
+    const x = this.obstacleCenterX - this.buttonWidth / 2;
+    const y = this.buttonCenterY - 38;
 
     this.obstacleBtnGfx.fillStyle(bgCol, 1);
-    this.obstacleBtnGfx.fillRoundedRect(45, 6, 260, 42, 10);
+    this.obstacleBtnGfx.fillRoundedRect(x, y, this.buttonWidth, 76, 10);
     this.obstacleBtnGfx.lineStyle(1.8, borderCol, 1);
-    this.obstacleBtnGfx.strokeRoundedRect(45, 6, 260, 42, 10);
+    this.obstacleBtnGfx.strokeRoundedRect(x, y, this.buttonWidth, 76, 10);
 
-    this.obstacleBtnText.setText(active ? '🧱 OBSTACLE: ON' : '🧱 ADD OBSTACLE');
-    this.obstacleBtnText.setColor(active ? THEME.colors.accentHex : '#94a3b8');
+    const mobile = this.viewport.width < 620;
+    this.obstacleBtnText.setText(active
+      ? (mobile ? 'TAP BOARD\nPLACE WALL' : 'TAP BOARD · PLACE WALL')
+      : (mobile && this.buttonWidth < 120 ? 'WALL' : 'PLACE A WALL'));
+    this.obstacleBtnText.setColor(active ? THEME.colors.accentHex : THEME.colors.textPrimary);
   }
 
   private toggleObstacleMode(): void {
     if (!this.turnManager.isPlayerTurn() || this.animating || this.turnManager.isGameOver()) return;
     if (this.board.getWallsRemaining(this.localPlayerId) <= 0) {
-      this.showTemporaryToast('No walls remaining!', 0xf87171);
+      this.showTemporaryToast('No walls remaining.', THEME.colors.danger);
       return;
     }
 
@@ -503,7 +700,7 @@ export class GameScene extends Phaser.Scene {
 
     if (this.isObstacleMode) {
       this.highlightContainer.removeAll(true);
-      this.showTemporaryToast('Double-click/tap obstacle to place!', 0x38bdf8);
+      this.showTemporaryToast('Tap the selected slot again to place the wall.', THEME.colors.accent);
       if (!this.selectedWallSlot) {
         this.selectWallSlot(7, 7);
       }
@@ -515,16 +712,21 @@ export class GameScene extends Phaser.Scene {
 
   private drawOrientationButton(): void {
     const isH = this.activeOrientation === 'H';
-    const rgb = isH ? THEME.colors.accent : 0xf43f5e;
-    const hex = isH ? THEME.colors.accentHex : '#f43f5e';
+    const rgb = isH ? THEME.colors.accent : THEME.colors.danger;
+    const hex = isH ? THEME.colors.accentHex : THEME.colors.dangerHex;
 
     this.flipBtnGfx.clear();
     this.flipBtnGfx.fillStyle(THEME.colors.surfaceRaised, 1);
-    this.flipBtnGfx.fillRoundedRect(355, 6, 260, 42, 10);
+    const x = this.orientationCenterX - this.buttonWidth / 2;
+    const y = this.buttonCenterY - 38;
+    this.flipBtnGfx.fillRoundedRect(x, y, this.buttonWidth, 76, 10);
     this.flipBtnGfx.lineStyle(1.8, rgb, 0.9);
-    this.flipBtnGfx.strokeRoundedRect(355, 6, 260, 42, 10);
+    this.flipBtnGfx.strokeRoundedRect(x, y, this.buttonWidth, 76, 10);
 
-    this.flipBtnText.setText(`🔄 ${isH ? 'HORIZONTAL' : 'VERTICAL'}`);
+    const mobile = this.viewport.width < 620;
+    this.flipBtnText.setText(mobile
+      ? `${isH ? 'HORIZONTAL' : 'VERTICAL'}\nWALL`
+      : `WALL: ${isH ? 'HORIZONTAL' : 'VERTICAL'}`);
     this.flipBtnText.setColor(hex);
   }
 
@@ -547,17 +749,17 @@ export class GameScene extends Phaser.Scene {
         const { x, y } = getCellCenter(r, c);
         const h = this.cellSize / 2;
 
-        gfx.fillStyle(0x1b2138, 1);
-        gfx.fillRoundedRect(x - h, y - h, this.cellSize, this.cellSize, 8);
-        gfx.lineStyle(1, 0x2b3557, 0.95);
-        gfx.strokeRoundedRect(x - h, y - h, this.cellSize, this.cellSize, 8);
+        gfx.fillStyle((r + c) % 4 === 0 ? THEME.colors.surfaceRaised : THEME.colors.bg, 1);
+        gfx.fillRect(x - h, y - h, this.cellSize, this.cellSize);
+        gfx.lineStyle(1, THEME.colors.border, 0.25);
+        gfx.strokeRect(x - h, y - h, this.cellSize, this.cellSize);
 
         if (r === 0) {
-          gfx.fillStyle(THEME.colors.accent, 0.08);
-          gfx.fillRoundedRect(x - h + 2, y - h + 2, this.cellSize - 4, this.cellSize - 4, 6);
+          gfx.fillStyle(THEME.colors.accent, 0.1);
+          gfx.fillRect(x - h + 1, y - h + 1, this.cellSize - 2, this.cellSize - 2);
         } else if (r === 16) {
-          gfx.fillStyle(THEME.colors.danger, 0.08);
-          gfx.fillRoundedRect(x - h + 2, y - h + 2, this.cellSize - 4, this.cellSize - 4, 6);
+          gfx.fillStyle(THEME.colors.danger, 0.1);
+          gfx.fillRect(x - h + 1, y - h + 1, this.cellSize - 2, this.cellSize - 2);
         }
 
         const hit = this.add.rectangle(x, y, this.cellSize, this.cellSize, 0, 0)
@@ -566,8 +768,10 @@ export class GameScene extends Phaser.Scene {
         hit.on('pointerdown', () => {
           this.handleCellClick(r, c);
         });
+        this.boardLayer.add(hit);
       }
     }
+    this.boardLayer.add(gfx);
   }
 
   private handleCellClick(row: number, col: number): void {
@@ -605,22 +809,37 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildTokens(): void {
-    this.player1Token = this.makeToken(16, 8, 0x1d4ed8, 0x38bdf8, 'P1');
-    this.cpuToken     = this.makeToken(0,  8, 0xb91c1c, 0xf87171, this.networkController ? 'P2' : 'CPU');
+    this.player1Token = this.makeToken(16, 8, THEME.colors.accent, THEME.colors.bg, 'YOU', 'circle');
+    this.cpuToken = this.makeToken(
+      0, 8, THEME.colors.danger, THEME.colors.bg,
+      this.networkController ? 'P2' : 'CPU', 'diamond'
+    );
+    this.boardLayer.add([this.player1Token, this.cpuToken]);
   }
 
-  private makeToken(row: number, col: number, outerColor: number, innerColor: number, label: string): Phaser.GameObjects.Container {
+  private makeToken(
+    row: number,
+    col: number,
+    outerColor: number,
+    innerColor: number,
+    label: string,
+    shape: 'circle' | 'diamond'
+  ): Phaser.GameObjects.Container {
     const { x, y } = getCellCenter(row, col);
     const c = this.add.container(x, y);
 
-    const base = this.add.circle(0, 0, 20, outerColor);
-    const inner = this.add.circle(0, 0, 14, innerColor);
+    const base = this.add.circle(0, 0, 20, innerColor);
+    base.setStrokeStyle(4, outerColor);
+    const inner = shape === 'circle'
+      ? this.add.circle(0, 0, 9, outerColor)
+      : this.add.polygon(0, 0, [0, -11, 11, 0, 0, 11, -11, 0], outerColor);
     const text = this.add.text(0, 0, label, {
       fontFamily: THEME.fonts.heading,
-      fontSize: '11px',
-      color: '#ffffff',
+      fontSize: label.length > 3 ? '8px' : '10px',
+      color: THEME.colors.textPrimary,
       fontStyle: 'bold'
     }).setOrigin(0.5);
+    text.setData('responsiveMinPixels', 10);
 
     c.add([base, inner, text]);
     c.setDepth(10);
@@ -641,10 +860,10 @@ export class GameScene extends Phaser.Scene {
       const h = this.cellSize / 2;
 
       const hl = this.add.graphics();
-      hl.fillStyle(0x38bdf8, 0.28);
-      hl.fillRoundedRect(x - h, y - h, this.cellSize, this.cellSize, 7);
-      hl.lineStyle(2, 0x38bdf8, 0.95);
-      hl.strokeRoundedRect(x - h, y - h, this.cellSize, this.cellSize, 7);
+      hl.fillStyle(THEME.colors.accent, 0.2);
+      hl.fillRect(x - h, y - h, this.cellSize, this.cellSize);
+      hl.lineStyle(2, THEME.colors.accent, 0.95);
+      hl.strokeRect(x - h, y - h, this.cellSize, this.cellSize);
 
       const zone = this.add.rectangle(x, y, this.cellSize, this.cellSize, 0, 0).setInteractive({ useHandCursor: true });
       zone.on('pointerdown', () => {
@@ -662,7 +881,7 @@ export class GameScene extends Phaser.Scene {
     const targetToken = opponentId === 1 ? this.player1Token : this.cpuToken;
 
     if (action.type === 'TIMEOUT') {
-      this.showTemporaryToast('⏰ Opponent ran out of time! Turn skipped.', 0xf87171);
+      this.showTemporaryToast('Opponent ran out of time. Their turn was skipped.', THEME.colors.danger);
       this.turnManager.onOpponentActionApplied();
       return;
     }
@@ -686,7 +905,7 @@ export class GameScene extends Phaser.Scene {
     } else {
       const [r, col] = action.coords;
       this.board.commitWall(opponentId, r, col, action.orientation);
-      this.drawWall(r, col, action.orientation, opponentId === 1 ? 0x38bdf8 : 0xf87171);
+      this.drawWall(r, col, action.orientation, opponentId === 1 ? THEME.colors.accent : THEME.colors.danger);
       this.turnManager.onOpponentActionApplied();
     }
   }
@@ -701,9 +920,9 @@ export class GameScene extends Phaser.Scene {
     const available = this.board.isWallSlotAvailable(r, col, this.activeOrientation, false);
 
     this.wallPreviewGfx.clear();
-    this.wallPreviewGfx.fillStyle(available ? 0x38bdf8 : 0xef4444, 0.6);
+    this.wallPreviewGfx.fillStyle(available ? THEME.colors.accent : THEME.colors.danger, 0.8);
     this.wallPreviewGfx.fillRoundedRect(x - w / 2, y - h / 2, w, h, 4);
-    this.wallPreviewGfx.lineStyle(2, available ? 0xffffff : 0xef4444, 0.95);
+    this.wallPreviewGfx.lineStyle(2, THEME.colors.border, 0.95);
     this.wallPreviewGfx.strokeRoundedRect(x - w / 2, y - h / 2, w, h, 4);
   }
 
@@ -720,7 +939,7 @@ export class GameScene extends Phaser.Scene {
 
     this.placedWallsGfx.fillStyle(color, 1);
     this.placedWallsGfx.fillRoundedRect(x - w / 2, y - h / 2, w, h, 4);
-    this.placedWallsGfx.lineStyle(1.5, 0xffffff, 0.6);
+    this.placedWallsGfx.lineStyle(1.5, THEME.colors.bg, 0.8);
     this.placedWallsGfx.strokeRoundedRect(x - w / 2, y - h / 2, w, h, 4);
   }
 
@@ -732,7 +951,8 @@ export class GameScene extends Phaser.Scene {
     const h = isH ? this.wallGap : wLen;
 
     const flash = this.add.graphics().setDepth(25);
-    flash.fillStyle(0xef4444, 0.9);
+    this.boardLayer.add(flash);
+    flash.fillStyle(THEME.colors.danger, 0.9);
     flash.fillRoundedRect(x - w / 2, y - h / 2, w, h, 4);
     this.tweens.add({ targets: flash, alpha: 0, duration: 320, ease: 'Power2', onComplete: () => flash.destroy() });
   }
@@ -761,41 +981,47 @@ export class GameScene extends Phaser.Scene {
     this.clearWallSelection();
     this.bannerContainer.removeAll(true);
 
+    const centerX = this.viewport.width / 2;
+    const centerY = this.viewport.height / 2;
+    const panelWidth = Math.min(560, this.viewport.width - 64);
+    const panelHeight = 280;
     const overlay = this.add.graphics();
-    overlay.fillStyle(0x03040a, 0.85);
-    overlay.fillRect(0, 0, 800, 800);
+    overlay.fillStyle(THEME.colors.overlay, 0.78);
+    overlay.fillRect(0, 0, this.viewport.width, this.viewport.height);
 
     const panel = this.add.graphics();
     panel.fillStyle(THEME.colors.surface, 1);
-    panel.fillRoundedRect(172, 266, 456, 268, 18);
-    panel.lineStyle(1.5, color, 0.85);
-    panel.strokeRoundedRect(172, 266, 456, 268, 18);
+    panel.fillRect(centerX - panelWidth / 2, centerY - panelHeight / 2, panelWidth, panelHeight);
+    panel.lineStyle(2, color, 1);
+    panel.strokeRect(centerX - panelWidth / 2, centerY - panelHeight / 2, panelWidth, panelHeight);
 
-    const t1 = this.add.text(400, 360, title, {
+    const t1 = this.add.text(centerX, centerY - 55, title, {
       fontFamily: THEME.fonts.heading,
-      fontSize: '32px',
-      color: '#' + color.toString(16).padStart(6, '0'),
+      fontSize: '38px',
+      color: Phaser.Display.Color.IntegerToColor(color).rgba,
       fontStyle: 'bold'
     }).setOrigin(0.5);
 
-    const t2 = this.add.text(400, 400, subtitle, {
+    const t2 = this.add.text(centerX, centerY - 5, subtitle, {
       fontFamily: THEME.fonts.body,
-      fontSize: '14px',
-      color: THEME.colors.textSecondary
+      fontSize: '18px',
+      color: THEME.colors.textSecondary,
+      align: 'center',
+      wordWrap: { width: panelWidth - 64 }
     }).setOrigin(0.5);
 
     const btnBg = this.add.graphics();
-    btnBg.fillStyle(color, 1);
-    btnBg.fillRoundedRect(305, 450, 190, 42, 10);
+    btnBg.fillStyle(THEME.colors.accent, 1);
+    btnBg.fillRect(centerX - 120, centerY + 48, 240, 56);
 
-    const btnText = this.add.text(400, 471, 'BACK TO MENU', {
+    const btnText = this.add.text(centerX, centerY + 76, 'BACK TO MENU', {
       fontFamily: THEME.fonts.heading,
-      fontSize: '13px',
+      fontSize: '18px',
       color: THEME.colors.onAccent,
       fontStyle: 'bold'
     }).setOrigin(0.5);
 
-    const btnHit = this.add.rectangle(400, 471, 190, 42, 0, 0).setInteractive({ useHandCursor: true });
+    const btnHit = this.add.rectangle(centerX, centerY + 76, 240, 60, 0, 0).setInteractive({ useHandCursor: true });
 
     btnHit.on('pointerdown', () => {
       this.networkController?.disconnect();
@@ -803,5 +1029,6 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.bannerContainer.add([overlay, panel, t1, t2, btnBg, btnText, btnHit]);
+    applyReadableText(this);
   }
 }

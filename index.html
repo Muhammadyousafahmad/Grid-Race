@@ -3,21 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#070810" />
+    <meta name="theme-color" content="#f4f0e4" />
     <meta name="description" content="Grid Race — a fast abstract strategy race game. Race to the opposite edge, block with walls, outsmart the CPU." />
     <title>Grid Race</title>
 
-    <!-- Modern UI fonts (loaded before boot so canvas text renders correctly) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
-      rel="stylesheet"
-    />
-
     <style>
+      @font-face {
+        font-family: 'Space Grotesk';
+        src: url('/fonts/space-grotesk-latin.woff2') format('woff2');
+        font-style: normal;
+        font-weight: 500 700;
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: 'DM Sans';
+        src: url('/fonts/dm-sans-latin.woff2') format('woff2');
+        font-style: normal;
+        font-weight: 400 700;
+        font-display: swap;
+      }
+
       :root {
-        color-scheme: dark;
+        color-scheme: light;
+        accent-color: var(--theme-accent, #315ea8);
+        --theme-bg: #f4f0e4;
+        --theme-accent: #315ea8;
+        --theme-selection-text: #f4f0e4;
       }
 
       * {
@@ -32,16 +44,13 @@
         height: 100%;
         overflow: hidden;
         overscroll-behavior: none;
-        background-color: #070810;
+        -webkit-text-size-adjust: 100%;
+        background-color: var(--theme-bg);
       }
 
       body {
-        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-        /* Ambient page glow so letterboxed areas still feel intentional */
-        background-color: #070810;
-        background-image:
-          radial-gradient(1100px 700px at 50% -10%, rgba(56, 189, 248, 0.09), transparent 60%),
-          radial-gradient(900px 650px at 100% 110%, rgba(248, 113, 113, 0.07), transparent 55%);
+        font-family: 'DM Sans', sans-serif;
+        background-color: var(--theme-bg);
         /* Honour notches / rounded display corners */
         padding:
           env(safe-area-inset-top)
@@ -50,7 +59,7 @@
           env(safe-area-inset-left);
       }
 
-      /* Full-viewport host: Phaser scales the 800x800 canvas to fit it (Scale.FIT) */
+      /* Phaser expands the viewport while keeping the route board square. */
       #game-container {
         position: relative;
         width: 100%;
@@ -60,8 +69,15 @@
 
       #game-container canvas {
         display: block;
+        width: 100%;
+        height: 100%;
         touch-action: none;
         -webkit-tap-highlight-color: transparent;
+      }
+
+      ::selection {
+        color: var(--theme-selection-text);
+        background: var(--theme-accent);
       }
     </style>
   </head>
@@ -70,4 +86,3 @@
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-

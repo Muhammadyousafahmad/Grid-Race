@@ -2,20 +2,19 @@ import Phaser from 'phaser';
 import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
 import { IntroScene } from './scenes/IntroScene';
+import { loadSavedTheme, THEME } from './config/Theme';
 
 /**
- * The game keeps a fixed 800x800 logical coordinate space (the board layout
- * and its unit tests depend on it). `Scale.FIT` uniformly scales that canvas
- * to any viewport — phone portrait/landscape, tablet, desktop or ultrawide —
- * and `CENTER_BOTH` letterboxes it against the page background.
+ * Scenes keep their 800px board coordinate system while expanding the
+ * viewport around it. This fills tall phone screens and wider desktops
+ * without stretching the square board.
  */
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.WEBGL,
   parent: 'game-container',
-  backgroundColor: '#0a0c15',
+  backgroundColor: THEME.colors.bgHex,
   scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    mode: Phaser.Scale.RESIZE,
     width: 800,
     height: 800,
     expandParent: false,
@@ -28,21 +27,22 @@ const config: Phaser.Types.Core.GameConfig = {
 /**
  * Boot only after the web fonts are available — canvas text is rasterised on
  * draw and cannot reflow later, so the first frame must already have the
- * intended typography. Falls back silently to system fonts when offline.
+ * intended typography.
  */
 async function boot(): Promise<void> {
+  loadSavedTheme();
   if (document.fonts) {
     try {
       await Promise.all([
         document.fonts.load("700 56px 'Space Grotesk'"),
-        document.fonts.load("700 22px 'Space Grotesk'"),
-        document.fonts.load("700 16px 'Inter'"),
-        document.fonts.load("500 16px 'Inter'"),
-        document.fonts.load("400 16px 'Inter'")
+        document.fonts.load("500 22px 'Space Grotesk'"),
+        document.fonts.load("700 16px 'DM Sans'"),
+        document.fonts.load("500 16px 'DM Sans'"),
+        document.fonts.load("400 16px 'DM Sans'")
       ]);
       await document.fonts.ready;
-    } catch {
-      /* Offline or unsupported — system font fallbacks already in THEME.fonts */
+    } catch (error) {
+      console.error('Unable to load the game fonts.', error);
     }
   }
 
@@ -50,4 +50,3 @@ async function boot(): Promise<void> {
 }
 
 void boot();
-
