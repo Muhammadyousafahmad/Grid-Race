@@ -12,6 +12,7 @@ export class IntroScene extends Phaser.Scene {
   private orbRed!: Phaser.GameObjects.Container;
   private isColliding = false;
   private finished = false;
+  private logoBottom = 0;
   private viewport: SceneViewport = { width: 800, height: 800, zoom: 1 };
   private gridCenterX = 400;
   private gridCenterY = 400;
@@ -66,26 +67,31 @@ export class IntroScene extends Phaser.Scene {
   }
 
   private buildLogo(): void {
-    const logoY = this.viewport.height * 0.17;
+    const typeScale = Math.min(1, this.viewport.width / 520, this.viewport.height / 580);
+    const titleSize = 64 * typeScale;
+    const subtitleSize = Math.max(12, 16 * typeScale);
+    const subtitleY = titleSize * 0.8;
+    const logoY = Math.max(this.viewport.height * 0.17, titleSize * 0.9);
+    this.logoBottom = logoY + Math.max(titleSize * 0.6, subtitleY + subtitleSize * 0.75);
     const logoContainer = this.add.container(this.viewport.width / 2, logoY - 5).setAlpha(0);
 
     const textGrid = this.add.text(0, 0, 'GRID RACE', {
       fontFamily: THEME.fonts.heading,
-      fontSize: '64px',
+      fontSize: `${titleSize}px`,
       color: THEME.colors.textPrimary,
       fontStyle: 'bold',
       letterSpacing: 1
     }).setOrigin(0.5);
 
-    const subtitle = this.add.text(0, 48, 'TWO RUNNERS. ONE CHANGING ROUTE.', {
+    const subtitle = this.add.text(0, subtitleY, 'TWO RUNNERS. ONE CHANGING ROUTE.', {
       fontFamily: THEME.fonts.body,
-      fontSize: '16px',
+      fontSize: `${subtitleSize}px`,
       color: THEME.colors.textSecondary,
       fontStyle: 'bold',
-      letterSpacing: 2
+      letterSpacing: Math.min(2, subtitleSize / 8)
     }).setOrigin(0.5);
 
-    logoContainer.add([textGrid, subtitle]);
+    logoContainer.setDepth(5).add([textGrid, subtitle]);
 
     this.tweens.add({
       targets: logoContainer,
@@ -100,11 +106,18 @@ export class IntroScene extends Phaser.Scene {
   private buildCyberGrid(): void {
     const grid = this.add.graphics().setDepth(2);
     const cx = this.viewport.width / 2;
-    const cy = this.viewport.height * 0.49;
-    const size = Math.min(420, this.viewport.width * 0.44, this.viewport.height * 0.56);
+    const gridTop = this.logoBottom + 18;
+    const bottom = this.viewport.height * 0.78 - 36;
+    const size = Math.max(80, Math.min(
+      420,
+      this.viewport.width * 0.88,
+      this.viewport.height * 0.4,
+      bottom - gridTop
+    ));
+    const cy = gridTop + size / 2;
     this.gridCenterX = cx;
     this.gridCenterY = cy;
-    this.gridTravel = size * 0.44;
+    this.gridTravel = Math.min(size * 0.44, Math.max(14, size / 2 - 18));
     const cell = size / 9;
     const left = cx - size / 2;
     const top = cy - size / 2;
@@ -167,13 +180,13 @@ export class IntroScene extends Phaser.Scene {
     this.progressY = cy;
     this.progressWidth = w;
 
-    const bgGfx = this.add.graphics();
+    const bgGfx = this.add.graphics().setDepth(15);
     bgGfx.fillStyle(THEME.colors.surfaceRaised, 1);
     bgGfx.fillRect(cx - w / 2, cy - h / 2, w, h);
     bgGfx.lineStyle(1, THEME.colors.borderSoft, 1);
     bgGfx.strokeRect(cx - w / 2, cy - h / 2, w, h);
 
-    this.progressFill = this.add.graphics();
+    this.progressFill = this.add.graphics().setDepth(16);
 
     this.statusText = this.add.text(cx, cy - 20, 'PLOTTING THE OPENING ROUTE...', {
       fontFamily: THEME.fonts.body,
@@ -181,7 +194,7 @@ export class IntroScene extends Phaser.Scene {
       color: THEME.colors.textSecondary,
       fontStyle: 'bold',
       letterSpacing: 2
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(17);
 
     this.progressPercentText = this.add.text(cx, cy + 22, '0%', {
       fontFamily: THEME.fonts.heading,
@@ -189,14 +202,14 @@ export class IntroScene extends Phaser.Scene {
       color: THEME.colors.accentHex,
       fontStyle: 'bold',
       letterSpacing: 1
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(17);
 
-    const skipHint = this.add.text(cx, this.viewport.height * 0.92, 'TAP · SPACE · ENTER TO SKIP', {
+    const skipHint = this.add.text(cx, Math.min(this.viewport.height - 22, this.viewport.height * 0.92), 'TAP · SPACE · ENTER TO SKIP', {
       fontFamily: THEME.fonts.body,
       fontSize: '15px',
       color: THEME.colors.textMuted,
       letterSpacing: 2
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(17);
 
     this.tweens.add({
       targets: skipHint,

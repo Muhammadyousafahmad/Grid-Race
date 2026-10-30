@@ -66,10 +66,13 @@ before Phaser starts because canvas text is rasterized.
   system. Expand the visible scene around the board to use the available
   viewport without stretching or letterboxing the canvas.
 - On wide screens, lead with four explicit match choices on the left and a
-  literal route map on the right. On short wide screens, use a compact two-row
-  choice grid beside the map. On portrait screens, stack choices and map
-  vertically; compact the map decoration when vertical space is limited.
-  Keep rules and keyboard shortcuts in the footer whenever they fit.
+  literal route map on the right. On medium-height wide screens, keep four
+  compact rows beside the map; reserve a two-row choice grid for very short
+  landscape viewports. On portrait screens, stack choices and map vertically;
+  compact the map decoration when vertical space is limited. Keep rules and
+  keyboard shortcuts in the footer whenever they fit.
+- Keep the intro route illustration clear of its responsive loading status,
+  progress bar, percentage, and skip hint.
 - Use square corners for map plates, cells, and primary selection rows.
 - Reserve rounded corners for compact in-game controls.
 - Keep the online-room flow and match HUD in the same paper-and-cartography

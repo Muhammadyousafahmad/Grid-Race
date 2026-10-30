@@ -96,7 +96,8 @@ export class MenuScene extends Phaser.Scene {
     const portraitPhone = phone && this.viewport.height > this.viewport.width * 1.15;
     const landscapePhone = phone && !portraitPhone;
     const shortPortraitPhone = portraitPhone && this.viewport.height < 700;
-    const compactWide = !phone && this.viewport.height < 760;
+    const compactWide = !phone && this.viewport.height < 520;
+    const mediumWide = !phone && this.viewport.height >= 520 && this.viewport.height < 760;
     const maxContentWidth = this.viewport.width >= 1500 ? 1840 : 1200;
     const contentWidth = Math.min(this.viewport.width - 80, maxContentWidth);
     const contentLeft = (this.viewport.width - contentWidth) / 2;
@@ -158,6 +159,23 @@ export class MenuScene extends Phaser.Scene {
       mapY = cardTop;
       showMapLabels = false;
       showMapCaption = false;
+    } else if (mediumWide) {
+      const left = contentLeft;
+      footerY = this.viewport.height - 44;
+      mapY = 224;
+      mapSize = Math.max(180, Math.min(
+        300,
+        this.viewport.height - mapY - 150,
+        contentWidth * 0.3
+      ));
+      const gridWidth = contentWidth - mapSize - 48;
+      cardWidth = gridWidth;
+      cardHeight = 72;
+      cardGap = 8;
+      columns = 1;
+      cardTop = 210;
+      cardX = left + gridWidth / 2;
+      mapX = left + gridWidth + 48;
     } else {
       const left = contentLeft;
       footerY = Math.max(200, this.viewport.height - 110);
